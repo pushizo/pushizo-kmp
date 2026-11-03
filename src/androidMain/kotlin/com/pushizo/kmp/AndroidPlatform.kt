@@ -7,6 +7,7 @@ import com.pushizo.sdk.HsForegroundEvent
 import com.pushizo.sdk.HsLog
 import com.pushizo.sdk.HsNotification
 import com.pushizo.sdk.HsPushSubscriptionState
+import com.pushizo.sdk.HsUserProfile
 import com.pushizo.sdk.Pushizo as Native
 
 actual typealias PushizoContext = Context
@@ -28,6 +29,8 @@ internal fun PushizoOptions.toNative(): Native.Options {
     val base = Native.Options(requiresPrivacyConsent = requiresPrivacyConsent, logLevel = logLevel.toNative())
     return apiUrl?.takeIf { it.isNotBlank() }?.let { base.copy(apiUrl = it) } ?: base
 }
+
+internal fun PushizoUserProfile.toNative() = HsUserProfile(email, sms, tags, aliases)
 
 internal fun HsNotification.toCommon() = PushizoNotification(
     title = title,
@@ -59,6 +62,9 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
 
     override fun setConsentGiven(given: Boolean) = Native.setConsentGiven(given)
     override fun login(externalId: String, identityHash: String?, jwt: String?) = Native.login(externalId, identityHash, jwt)
+    override fun login(externalId: String, profile: PushizoUserProfile, identityHash: String?, jwt: String?) =
+        Native.login(externalId, profile.toNative(), identityHash, jwt)
+
     override fun updateUserJwt(jwt: String) = Native.updateUserJwt(jwt)
     override fun logout() = Native.logout()
     override fun setLogLevel(level: PushizoLogLevel) = Native.Debug.setLogLevel(level.toNative())

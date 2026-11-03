@@ -13,6 +13,14 @@ data class PushizoOptions(
     val logLevel: PushizoLogLevel = PushizoLogLevel.WARN,
 )
 
+/** Girişle birlikte ayarlanan profil. Geçersiz e-posta veya telefon girişten önce reddedilir. */
+data class PushizoUserProfile(
+    val email: String? = null,
+    val sms: String? = null,
+    val tags: Map<String, String> = emptyMap(),
+    val aliases: Map<String, String> = emptyMap(),
+)
+
 /** Bildirim düğmesi. */
 data class PushizoNotificationAction(val id: String, val title: String, val url: String?)
 

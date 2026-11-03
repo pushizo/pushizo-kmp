@@ -25,6 +25,10 @@ object Pushizo {
     fun login(externalId: String, identityHash: String? = null, jwt: String? = null) =
         platform.login(externalId, identityHash, jwt)
 
+    /** Kullanıcıyı kimliklendirir ve [profile] alanlarını tek çağrıda ayarlar. */
+    fun login(externalId: String, profile: PushizoUserProfile, identityHash: String? = null, jwt: String? = null) =
+        platform.login(externalId, profile, identityHash, jwt)
+
     fun updateUserJwt(jwt: String) = platform.updateUserJwt(jwt)
 
     fun logout() = platform.logout()

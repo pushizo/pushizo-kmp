@@ -24,7 +24,7 @@ kotlin {
     sourceSets {
         androidMain.dependencies {
             // `api`: Inbox gibi ortak API dışındaki yerel özellikler androidMain'den doğrudan çağrılabilir.
-            api("com.pushizo:pushizo-android:0.2.0")
+            api("com.pushizo:pushizo-android:0.2.1")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

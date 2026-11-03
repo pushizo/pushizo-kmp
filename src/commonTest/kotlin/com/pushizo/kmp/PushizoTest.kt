@@ -18,6 +18,7 @@ private class RecordingPlatform : PushizoPlatform {
     override fun initialize(context: PushizoContext, appId: String, options: PushizoOptions) = rec("initialize $appId")
     override fun setConsentGiven(given: Boolean) = rec("consent $given")
     override fun login(externalId: String, identityHash: String?, jwt: String?) = rec("login $externalId $identityHash $jwt")
+    override fun login(externalId: String, profile: PushizoUserProfile, identityHash: String?, jwt: String?) = rec("loginProfile $externalId ${profile.email} ${profile.tags} $jwt")
     override fun updateUserJwt(jwt: String) = rec("jwt $jwt")
     override fun logout() = rec("logout")
     override fun setLogLevel(level: PushizoLogLevel) = rec("log $level")
@@ -91,6 +92,12 @@ class PushizoTest {
             fake.calls,
         )
         assertTrue(Pushizo.isInitialized)
+    }
+
+    @Test
+    fun profilliGiris() {
+        Pushizo.login("user_42", PushizoUserProfile(email = "a@ornek.com", tags = mapOf("plan" to "pro")), jwt = "j")
+        assertEquals(listOf("loginProfile user_42 a@ornek.com {plan=pro} j"), fake.calls)
     }
 
     @Test

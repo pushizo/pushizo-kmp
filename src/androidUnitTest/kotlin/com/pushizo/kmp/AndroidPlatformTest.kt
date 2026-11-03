@@ -67,6 +67,15 @@ class AndroidPlatformTest {
     }
 
     @Test
+    fun `profil yerel modele eksiksiz çevrilir`() {
+        val native = PushizoUserProfile("a@ornek.com", "+905551112233", mapOf("p" to "1"), mapOf("crm" to "c1")).toNative()
+        assertEquals("a@ornek.com", native.email)
+        assertEquals("+905551112233", native.sms)
+        assertEquals(mapOf("p" to "1"), native.tags)
+        assertEquals(mapOf("crm" to "c1"), native.aliases)
+    }
+
+    @Test
     fun `android hedefi yerel platforma bağlıdır`() {
         assertSame(AndroidPushizoPlatform, createPushizoPlatform())
     }

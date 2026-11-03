@@ -12,6 +12,7 @@ internal interface PushizoPlatform {
     fun initialize(context: PushizoContext, appId: String, options: PushizoOptions)
     fun setConsentGiven(given: Boolean)
     fun login(externalId: String, identityHash: String?, jwt: String?)
+    fun login(externalId: String, profile: PushizoUserProfile, identityHash: String?, jwt: String?)
     fun updateUserJwt(jwt: String)
     fun logout()
     fun setLogLevel(level: PushizoLogLevel)
