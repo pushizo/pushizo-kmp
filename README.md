@@ -1,8 +1,53 @@
+<!-- pushizo:header -->
+<p align="center">
+  <a href="https://pushizo.com"><img src="https://raw.githubusercontent.com/pushizo/.github/main/profile/assets/mark.svg" alt="Pushizo" width="56" height="56"></a>
+</p>
+<p align="center">
+  <a href="https://docs.pushizo.com/docs/sdk/kmp"><img src="https://img.shields.io/badge/docs-docs.pushizo.com-5b4bdb" alt="Docs"></a>
+  <a href="https://docs.pushizo.com/docs/api"><img src="https://img.shields.io/badge/API-reference-b44fc4" alt="API reference"></a>
+  <a href="https://github.com/pushizo/pushizo-kmp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-16130f" alt="License: MIT"></a>
+</p>
+<p align="center"><a href="#english">English</a> · <a href="#türkçe">Türkçe</a></p>
+
+## English
+
+**Pushizo Kotlin Multiplatform SDK** — Shared Kotlin API for push notifications, users, tags and aliases, events, in-app triggers, notification inbox, preferences, feature flags and geofencing. Wraps the native Pushizo Android SDK and the Objective-C surface of the iOS SDK (Pushizo.xcframework).
+
+> **Status:** Android and iOS targets are ready; the Maven Central release (com.pushizo:pushizo-kmp) is pending.<br>
+> **Durum:** Android ve iOS hedefleri hazır; Maven Central yayını (com.pushizo:pushizo-kmp) bekleniyor.
+
+**Install from GitHub until then · O zamana kadar GitHub'dan kurulum:**
+
+```bash
+git clone --branch 0.2.0 https://github.com/pushizo/pushizo-ios
+pushizo-ios/scripts/build-xcframework.sh
+git clone --branch v0.2.0 https://github.com/pushizo/pushizo-kmp
+gradle -p pushizo-kmp publishToMavenLocal -Ppushizo.xcframework=$PWD/pushizo-ios/build/xcframework/Pushizo.xcframework
+```
+
+**After publication · Yayından sonra:**
+
+```kotlin
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            api("com.pushizo:pushizo-kmp:0.2.0")
+        }
+    }
+}
+```
+
+The detailed guide below is in Turkish; code samples are language-neutral. Full documentation:
+[docs.pushizo.com/docs/sdk/kmp](https://docs.pushizo.com/docs/sdk/kmp) · API reference: [docs.pushizo.com/docs/api](https://docs.pushizo.com/docs/api).
+
+## Türkçe
+<!-- /pushizo:header -->
+
 # Pushizo Kotlin Multiplatform SDK
 
 Ortak Kotlin kodundan Pushizo'yu çağırmak için `com.pushizo:pushizo-kmp`. Mantığı yeniden yazmaz: her platformda yerel SDK'ya devreder; teslimat, kuyruk, oturum ve in-app çizimi yerel SDK'da kalır (ADR-0055).
 
-**Durum:** Android (`androidTarget`) ve iOS (`iosArm64`, `iosSimulatorArm64`, `iosX64`) hedefleri hazır ve test edildi. iOS hedefi iOS SDK'nın Objective-C cephesini (`Pushizo.xcframework`, `PZ` önekli sınıflar) cinterop ile sarar ve yalnızca macOS'ta derlenir. Maven Central yayınına kadar kaynaktan kullanılır.
+**Durum:** Android (`androidTarget`) ve iOS (`iosArm64`, `iosSimulatorArm64`, `iosX64`) hedefleri hazır ve test edildi. iOS hedefi iOS SDK'nın Objective-C cephesini (`Pushizo.xcframework`, `PZ` önekli sınıflar) cinterop ile sarar ve yalnızca macOS'ta derlenir. Maven Central (`com.pushizo:pushizo-kmp`) yayın yapılandırması hazır; yayın kullanıcıda (`npm run sdk:publish -- maven-kmp --yayinla`, macOS). O zamana kadar kaynaktan kullanılır.
 
 Sunucudan bildirim göndermek için bu paket değil, ayrı olan JVM istemcisi `sdk/kmp` kullanılır.
 
@@ -20,7 +65,7 @@ Ortak modülün `build.gradle.kts` dosyası:
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api("com.pushizo:pushizo-kmp:0.1.0")
+            api("com.pushizo:pushizo-kmp:0.2.0")
         }
     }
 }
@@ -92,3 +137,24 @@ gradle :iosSimulatorArm64Test :linkDebugTestIosArm64
 Android SDK `includeBuild("../android")` ile kaynaktan derlenir; iOS hedefleri `sdk/ios/build/xcframework/Pushizo.xcframework`'e
 bağlanır (`-Ppushizo.xcframework=<yol>`). iOS uygulaması başlatmada `Pushizo.initialize(PushizoApplicationContext, "app_…")`
 çağırır. Kotlin 2.2.21 (Xcode 26 SDK'sı için gerekli). Örnek uygulama: `examples/kmp-app`.
+
+<!-- pushizo:footer -->
+---
+
+## Support · Destek
+
+- **Guide · Rehber:** [docs.pushizo.com/docs/sdk/kmp](https://docs.pushizo.com/docs/sdk/kmp)
+- **API reference & OpenAPI · API referansı ve OpenAPI:** [docs.pushizo.com/docs/api](https://docs.pushizo.com/docs/api) ·
+  [pushizo-openapi](https://github.com/pushizo/pushizo-openapi)
+- **Bugs & ideas · Hata ve öneri:** [Issues](https://github.com/pushizo/pushizo-kmp/issues)
+- **Security · Güvenlik:** please do not open public issues; email [security@pushizo.com](mailto:security@pushizo.com) ·
+  herkese açık issue açmayın, bu adrese yazın.
+- **Help · Destek:** [support@pushizo.com](mailto:support@pushizo.com)
+
+This repository is mirrored automatically from the Pushizo main repository on every release. Please open an issue
+instead of a pull request; fixes land in the main repository and ship with the next release.
+Bu depo her sürümde Pushizo ana deposundan otomatik yansıtılır. Pull request yerine issue açın; düzeltmeler ana depoda
+yapılır ve bir sonraki sürümle buraya gelir.
+
+Released under the MIT License · MIT lisanslıdır — [LICENSE](https://github.com/pushizo/pushizo-kmp/blob/main/LICENSE).
+<!-- /pushizo:footer -->
