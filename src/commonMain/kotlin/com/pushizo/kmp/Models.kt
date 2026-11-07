@@ -54,3 +54,59 @@ data class PushizoSubscriptionState(val id: String?, val token: String?, val opt
 fun interface PushizoListenerRegistration {
     fun remove()
 }
+
+/** Bildirim kutusu öğesi. Zamanlar epoch milisaniyedir. */
+data class PushizoInboxItem(
+    val id: String,
+    val messageId: String?,
+    val title: String?,
+    val body: String?,
+    val url: String?,
+    val imageUrl: String?,
+    val data: Map<String, String>,
+    val read: Boolean,
+    val readAt: Long?,
+    val archivedAt: Long?,
+    val expiresAt: Long?,
+    val createdAt: Long?,
+)
+
+/** Bildirim kutusu sayfası (yeniden eskiye). */
+data class PushizoInboxPage(val items: List<PushizoInboxItem>, val unreadCount: Int, val nextCursor: String?, val hasMore: Boolean)
+
+/** Kullanıcı tercihi: kategori × kanal (`null` = tüm kanallar) → opt-in. [explicit] false ise kategori varsayılanından türetilmiştir. */
+data class PushizoPreference(
+    val category: String,
+    /** `null` | `ios_push` | `android_push` | `web_push` | `email` | `sms`. */
+    val channel: String?,
+    val optedIn: Boolean,
+    val explicit: Boolean,
+    val source: String?,
+    val updatedAt: Long?,
+)
+
+/** Mesaj kategorisi: çok dilli ad ve açıklama (`dil kodu → metin`), kanal kısıtı (`null` = tümü), varsayılan opt-in. */
+data class PushizoMessageCategory(
+    val key: String,
+    val name: Map<String, String>,
+    val description: Map<String, String>,
+    val channels: List<String>?,
+    val defaultOptedIn: Boolean,
+) {
+    /** Verilen dilde ad; yoksa İngilizce, o da yoksa ilk tanımlı dil. */
+    fun localizedName(language: String): String = name[language] ?: name["en"] ?: name.values.firstOrNull() ?: key
+}
+
+/** Rıza kaydı (amaç → verildi mi). */
+data class PushizoConsent(val purpose: String, val granted: Boolean, val source: String?, val updatedAt: Long?)
+
+/** Tercih okuma/yazma sonucu: kullanıcının tercihleri, app'in kategorileri ve rıza kayıtları. */
+data class PushizoPreferencesResult(
+    val preferences: List<PushizoPreference>,
+    val categories: List<PushizoMessageCategory>,
+    val consents: List<PushizoConsent> = emptyList(),
+)
+
+/** `User.setPreferences` girdisi; [channel] null ise tüm kanallar. */
+data class PushizoPreferenceInput(val category: String, val channel: String? = null, val optedIn: Boolean)
+

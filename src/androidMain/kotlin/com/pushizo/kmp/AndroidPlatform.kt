@@ -3,12 +3,23 @@ package com.pushizo.kmp
 import android.app.Activity
 import android.content.Context
 import com.pushizo.sdk.HsClickEvent
+import com.pushizo.sdk.HsConsent
 import com.pushizo.sdk.HsForegroundEvent
+import com.pushizo.sdk.HsInboxItem
+import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
+import com.pushizo.sdk.HsMessageCategory
 import com.pushizo.sdk.HsNotification
+import com.pushizo.sdk.HsPreference
+import com.pushizo.sdk.HsPreferenceInput
+import com.pushizo.sdk.HsPreferencesResult
 import com.pushizo.sdk.HsPushSubscriptionState
 import com.pushizo.sdk.HsUserProfile
 import com.pushizo.sdk.Pushizo as Native
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+import org.json.JSONArray
+import org.json.JSONObject
 
 actual typealias PushizoContext = Context
 
@@ -47,6 +58,29 @@ internal fun HsNotification.toCommon() = PushizoNotification(
 internal fun HsClickEvent.toCommon() = PushizoClickEvent(notification.toCommon(), actionId, url)
 
 internal fun HsPushSubscriptionState.toCommon() = PushizoSubscriptionState(id, token, optedIn, permission)
+
+internal fun HsInboxItem.toCommon() = PushizoInboxItem(id, messageId, title, body, url, imageUrl, data, read, readAt, archivedAt, expiresAt, createdAt)
+
+internal fun HsInboxPage.toCommon() = PushizoInboxPage(items.map { it.toCommon() }, unreadCount, nextCursor, hasMore)
+
+internal fun HsPreference.toCommon() = PushizoPreference(category, channel, optedIn, explicit, source, updatedAt)
+
+internal fun HsMessageCategory.toCommon() = PushizoMessageCategory(key, name, description, channels, defaultOptedIn)
+
+internal fun HsConsent.toCommon() = PushizoConsent(purpose, granted, source, updatedAt)
+
+internal fun HsPreferencesResult.toCommon() =
+    PushizoPreferencesResult(preferences.map { it.toCommon() }, categories.map { it.toCommon() }, consents.map { it.toCommon() })
+
+internal fun PushizoPreferenceInput.toNative() = HsPreferenceInput(category, channel, optedIn)
+
+/** Bayrak değerindeki `org.json` türleri ortak koleksiyonlara çevrilir; `JSONObject.NULL` null olur. */
+internal fun Any?.toCommonJson(): Any? = when (this) {
+    null, JSONObject.NULL -> null
+    is JSONObject -> keys().asSequence().associateWith { get(it).toCommonJson() }
+    is JSONArray -> (0 until length()).map { get(it).toCommonJson() }
+    else -> this
+}
 
 private class AndroidForegroundEvent(private val event: HsForegroundEvent) : PushizoForegroundEvent {
     override val notification: PushizoNotification = event.notification.toCommon()
@@ -137,4 +171,20 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
         Native.Location.requestPermission(host, rationale)
 
     override fun onLocationPermissionResult() = Native.Location.onPermissionResult()
+    override val geofencingEnabled: Boolean get() = Native.Location.isGeofencingEnabled
+    override fun setGeofencingEnabled(enabled: Boolean) = Native.Location.setGeofencingEnabled(enabled)
+
+    override suspend fun inboxList(limit: Int, cursor: String?): PushizoInboxPage = Native.Inbox.list(limit, cursor).toCommon()
+    override suspend fun inboxMarkRead(id: String): PushizoInboxItem = Native.Inbox.markRead(id).toCommon()
+    override suspend fun inboxMarkAllRead(): Int = Native.Inbox.markAllRead()
+    override suspend fun inboxArchive(id: String) = Native.Inbox.archive(id)
+    override suspend fun inboxUnreadCount(): Int = Native.Inbox.unreadCount()
+
+    override suspend fun getPreferences(): PushizoPreferencesResult = Native.User.getPreferences().toCommon()
+    override suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult =
+        Native.User.setPreferences(preferences.map { it.toNative() }).toCommon()
+
+    override suspend fun refreshFeatureFlags(): Boolean = suspendCoroutine { cont -> Native.FeatureFlags.refresh { cont.resume(it) } }
+    override fun isFeatureEnabled(key: String, default: Boolean): Boolean = Native.FeatureFlags.isEnabled(key, default)
+    override fun featureFlagValue(key: String): Any? = Native.FeatureFlags.getValue(key).toCommonJson()
 }

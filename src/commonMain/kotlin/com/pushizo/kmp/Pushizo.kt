@@ -112,5 +112,40 @@ object Pushizo {
 
         /** Android: Activity `onRequestPermissionsResult` içinden çağrılır. */
         fun onPermissionResult() = platform.onLocationPermissionResult()
+
+        /**
+         * Arka plan bölge izleme (varsayılan kapalı). Üç koşul birlikte gerekir: bu bayrak, `setShared(true)` ve
+         * kullanıcının arka plan konum izni; izinleri uygulama ister, SDK manifeste izin eklemez.
+         */
+        val isGeofencingEnabled: Boolean get() = platform.geofencingEnabled
+        fun setGeofencingEnabled(enabled: Boolean) = platform.setGeofencingEnabled(enabled)
+    }
+
+    /** Bildirim kutusu (`add_to_inbox` mesajları). Kullanıcı ve abonelik yoksa çağrılar hata fırlatır. */
+    object Inbox {
+        /** Öğeler (yeniden eskiye), okunmamış sayısı ve sonraki sayfa imleci; [limit] 1–200. */
+        suspend fun list(limit: Int = 50, cursor: String? = null): PushizoInboxPage = platform.inboxList(limit, cursor)
+        suspend fun markRead(id: String): PushizoInboxItem = platform.inboxMarkRead(id)
+        /** Okundu işaretlenen öğe sayısını döndürür. */
+        suspend fun markAllRead(): Int = platform.inboxMarkAllRead()
+        suspend fun archive(id: String) = platform.inboxArchive(id)
+        suspend fun unreadCount(): Int = platform.inboxUnreadCount()
+    }
+
+    /** Mesaj kategorisi tercihleri ve rıza kayıtları. */
+    object Preferences {
+        suspend fun get(): PushizoPreferencesResult = platform.getPreferences()
+        suspend fun set(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult = platform.setPreferences(preferences)
+        suspend fun consents(): List<PushizoConsent> = platform.getPreferences().consents
+    }
+
+    /** Özellik bayrakları: değerler oturum başında yenilenir ve cihazda saklanır. */
+    object FeatureFlags {
+        /** Değerleri hemen yeniler; hata son değerleri korur ve false döner. */
+        suspend fun refresh(): Boolean = platform.refreshFeatureFlags()
+        /** Bayrak bu kullanıcı için açık mı; değer henüz yoksa [default]. */
+        fun isEnabled(key: String, default: Boolean = false): Boolean = platform.isFeatureEnabled(key, default)
+        /** Bayrağın değeri (metin, sayı, mantıksal, `Map` veya `List`); değer yoksa [default]. */
+        fun getValue(key: String, default: Any? = null): Any? = platform.featureFlagValue(key) ?: default
     }
 }

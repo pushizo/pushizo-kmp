@@ -1,5 +1,8 @@
 package com.pushizo.kmp
 
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -62,6 +65,35 @@ private class RecordingPlatform : PushizoPlatform {
     override fun setLocationShared(shared: Boolean) = rec("location $shared")
     override fun requestLocationPermission(host: PushizoPermissionHost, rationale: String?) = rec("locationPermission $rationale")
     override fun onLocationPermissionResult() = rec("locationPermissionResult")
+    private var geofencing = false
+    override val geofencingEnabled: Boolean get() = geofencing
+    override fun setGeofencingEnabled(enabled: Boolean) { rec("geofencing $enabled"); geofencing = enabled }
+
+    val inboxItem = PushizoInboxItem("inb_1", "msg_1", "Başlık", "Gövde", null, null, emptyMap(), read = false, readAt = null, archivedAt = null, expiresAt = null, createdAt = 1L)
+    override suspend fun inboxList(limit: Int, cursor: String?): PushizoInboxPage { rec("inboxList $limit $cursor"); return PushizoInboxPage(listOf(inboxItem), 1, "c2", true) }
+    override suspend fun inboxMarkRead(id: String): PushizoInboxItem { rec("inboxMarkRead $id"); return inboxItem.copy(read = true, readAt = 2L) }
+    override suspend fun inboxMarkAllRead(): Int { rec("inboxMarkAllRead"); return 3 }
+    override suspend fun inboxArchive(id: String) = rec("inboxArchive $id")
+    override suspend fun inboxUnreadCount(): Int { rec("inboxUnreadCount"); return 1 }
+
+    val preferencesResult = PushizoPreferencesResult(
+        listOf(PushizoPreference("promo", null, optedIn = false, explicit = true, source = "sdk", updatedAt = 5L)),
+        listOf(PushizoMessageCategory("promo", mapOf("tr" to "Kampanyalar", "en" to "Promotions"), emptyMap(), null, defaultOptedIn = true)),
+        listOf(PushizoConsent("ads", granted = true, source = "sdk", updatedAt = 6L)),
+    )
+    override suspend fun getPreferences(): PushizoPreferencesResult { rec("getPreferences"); return preferencesResult }
+    override suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult { rec("setPreferences $preferences"); return preferencesResult }
+
+    override suspend fun refreshFeatureFlags(): Boolean { rec("flagsRefresh"); return true }
+    override fun isFeatureEnabled(key: String, default: Boolean) = if (key == "yeni_sepet") true else default
+    override fun featureFlagValue(key: String): Any? = if (key == "limit") 3 else null
+}
+
+/** Sahte platform eşzamanlı tamamlandığı için askıya alınan çağrı ek bağımlılık olmadan çalıştırılır. */
+private fun <T> runSuspending(block: suspend () -> T): T {
+    var result: Result<T>? = null
+    block.startCoroutine(Continuation(EmptyCoroutineContext) { result = it })
+    return checkNotNull(result) { "askıya alınan çağrı eşzamanlı tamamlanmadı" }.getOrThrow()
 }
 
 class PushizoTest {
@@ -182,5 +214,45 @@ class PushizoTest {
         assertTrue(fake.inAppPaused)
         assertTrue(Pushizo.Location.isShared)
         assertFalse(Pushizo.Location.permissionGranted)
+    }
+
+    @Test
+    fun geofencingVarsayilanKapaliVePlatformaGecer() {
+        assertFalse(Pushizo.Location.isGeofencingEnabled)
+        Pushizo.Location.setGeofencingEnabled(true)
+        assertTrue(Pushizo.Location.isGeofencingEnabled)
+        assertEquals(listOf("geofencing true"), fake.calls)
+    }
+
+    @Test
+    fun gelenKutusuCagrilariPlatformaAynenGider() {
+        val page = runSuspending { Pushizo.Inbox.list(limit = 20, cursor = "c1") }
+        assertEquals("inb_1", page.items.single().id)
+        assertEquals(listOf(1, "c2", true), listOf(page.unreadCount, page.nextCursor, page.hasMore))
+        assertTrue(runSuspending { Pushizo.Inbox.markRead("inb_1") }.read)
+        assertEquals(3, runSuspending { Pushizo.Inbox.markAllRead() })
+        runSuspending { Pushizo.Inbox.archive("inb_1") }
+        assertEquals(1, runSuspending { Pushizo.Inbox.unreadCount() })
+        assertEquals(listOf("inboxList 20 c1", "inboxMarkRead inb_1", "inboxMarkAllRead", "inboxArchive inb_1", "inboxUnreadCount"), fake.calls)
+    }
+
+    @Test
+    fun tercihlerVeRizalar() {
+        val result = runSuspending { Pushizo.Preferences.set(listOf(PushizoPreferenceInput("promo", optedIn = false))) }
+        assertEquals("Kampanyalar", result.categories.single().localizedName("tr"))
+        assertEquals("Promotions", result.categories.single().localizedName("de"))
+        assertEquals(listOf("ads"), runSuspending { Pushizo.Preferences.consents() }.map { it.purpose })
+        assertEquals(listOf("setPreferences [PushizoPreferenceInput(category=promo, channel=null, optedIn=false)]", "getPreferences"), fake.calls)
+    }
+
+    @Test
+    fun ozellikBayraklari() {
+        assertTrue(runSuspending { Pushizo.FeatureFlags.refresh() })
+        assertTrue(Pushizo.FeatureFlags.isEnabled("yeni_sepet"))
+        assertFalse(Pushizo.FeatureFlags.isEnabled("yok"))
+        assertTrue(Pushizo.FeatureFlags.isEnabled("yok", default = true))
+        assertEquals(3, Pushizo.FeatureFlags.getValue("limit"))
+        assertEquals("varsayılan", Pushizo.FeatureFlags.getValue("yok", "varsayılan"))
+        assertEquals(listOf("flagsRefresh"), fake.calls)
     }
 }

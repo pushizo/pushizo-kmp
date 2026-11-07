@@ -59,6 +59,22 @@ internal interface PushizoPlatform {
     fun setLocationShared(shared: Boolean)
     fun requestLocationPermission(host: PushizoPermissionHost, rationale: String?)
     fun onLocationPermissionResult()
+    val geofencingEnabled: Boolean
+    fun setGeofencingEnabled(enabled: Boolean)
+
+    suspend fun inboxList(limit: Int, cursor: String?): PushizoInboxPage
+    suspend fun inboxMarkRead(id: String): PushizoInboxItem
+    suspend fun inboxMarkAllRead(): Int
+    suspend fun inboxArchive(id: String)
+    suspend fun inboxUnreadCount(): Int
+
+    suspend fun getPreferences(): PushizoPreferencesResult
+    suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult
+
+    suspend fun refreshFeatureFlags(): Boolean
+    fun isFeatureEnabled(key: String, default: Boolean): Boolean
+    /** Metin, sayı, mantıksal, `Map<String, Any?>` veya `List<Any?>`; değer yoksa null. */
+    fun featureFlagValue(key: String): Any?
 }
 
 internal expect fun createPushizoPlatform(): PushizoPlatform

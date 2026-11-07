@@ -66,7 +66,18 @@ override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out
 
 Ortak API: başlatma, gizlilik onayı, `login` / `logout`, JWT yenileme, etiket, takma ad, dil, e-posta ve SMS, push aboneliği, bildirim izni, tıklama ve ön plan dinleyicileri, olaylar, in-app tetikleri ve konum paylaşımı.
 
-Bildirim kutusu, tercih merkezi, canlı sohbet ve özel in-app çizici ortak API'de yok. Android'de `api` bağımlılığı sayesinde `androidMain` içinden `com.pushizo.sdk.Pushizo` ile doğrudan çağrılır.
+Bildirim kutusu (`Pushizo.Inbox`), tercihler ve rızalar (`Pushizo.Preferences`), özellik bayrakları (`Pushizo.FeatureFlags`)
+ve arka plan bölge izleme (`Pushizo.Location.setGeofencingEnabled`) ortak API'dedir; ağ çağrıları `suspend` fonksiyondur:
+
+```kotlin
+val page = Pushizo.Inbox.list(limit = 20)
+Pushizo.Inbox.markRead(page.items.first().id)
+Pushizo.Preferences.set(listOf(PushizoPreferenceInput("promo", optedIn = false)))
+if (Pushizo.FeatureFlags.refresh() && Pushizo.FeatureFlags.isEnabled("yeni_sepet")) { /* … */ }
+Pushizo.Location.setGeofencingEnabled(true) // yalnızca konum paylaşımı ve arka plan izni varsa izler
+```
+
+Canlı sohbet, gömülü yerleşimler ve özel in-app çizici ortak API'de yok. Android'de `api` bağımlılığı sayesinde `androidMain` içinden `com.pushizo.sdk.Pushizo` ile doğrudan çağrılır.
 
 ## Geliştirme
 
