@@ -1,0 +1,5 @@
+# Pushizo iOS SDK'sının Objective-C cephesi (PZ önekli sınıflar; plan 13 Faz 29). Framework yolu Gradle'dan -F ile verilir.
+language = Objective-C
+modules = Pushizo
+package = com.pushizo.kmp.ios
+compilerOpts = -fmodules

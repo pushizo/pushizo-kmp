@@ -2,7 +2,7 @@
 
 Ortak Kotlin kodundan Pushizo'yu çağırmak için `com.pushizo:pushizo-kmp`. Mantığı yeniden yazmaz: her platformda yerel SDK'ya devreder; teslimat, kuyruk, oturum ve in-app çizimi yerel SDK'da kalır (ADR-0055).
 
-**Durum:** Android hedefi hazır ve test edildi. iOS hedefi henüz yok: Kotlin/Native Swift'i doğrudan çağıramadığı için iOS SDK'nın Objective-C köprüsünü (Faz 29) bekliyor ve yalnızca macOS'ta derlenir. Paket iOS hedefiyle birlikte Maven Central'a çıkacak; o zamana kadar kaynaktan kullanılır.
+**Durum:** Android (`androidTarget`) ve iOS (`iosArm64`, `iosSimulatorArm64`, `iosX64`) hedefleri hazır ve test edildi. iOS hedefi iOS SDK'nın Objective-C cephesini (`Pushizo.xcframework`, `PZ` önekli sınıflar) cinterop ile sarar ve yalnızca macOS'ta derlenir. Maven Central yayınına kadar kaynaktan kullanılır.
 
 Sunucudan bildirim göndermek için bu paket değil, ayrı olan JVM istemcisi `sdk/kmp` kullanılır.
 
@@ -84,6 +84,11 @@ Canlı sohbet, gömülü yerleşimler ve özel in-app çizici ortak API'de yok. 
 ```bash
 cd sdk/kmp-mobile
 gradle :testDebugUnitTest :assembleRelease
+# iOS (macOS): önce framework, sonra simülatör testleri (ortak testler + iOS dönüşüm testleri)
+../ios/scripts/build-xcframework.sh
+gradle :iosSimulatorArm64Test :linkDebugTestIosArm64
 ```
 
-Android SDK `includeBuild("../android")` ile kaynaktan derlenir. Örnek uygulama: `examples/kmp-app`.
+Android SDK `includeBuild("../android")` ile kaynaktan derlenir; iOS hedefleri `sdk/ios/build/xcframework/Pushizo.xcframework`'e
+bağlanır (`-Ppushizo.xcframework=<yol>`). iOS uygulaması başlatmada `Pushizo.initialize(PushizoApplicationContext, "app_…")`
+çağırır. Kotlin 2.2.21 (Xcode 26 SDK'sı için gerekli). Örnek uygulama: `examples/kmp-app`.
