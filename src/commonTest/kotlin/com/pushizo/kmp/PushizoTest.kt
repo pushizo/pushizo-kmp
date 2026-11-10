@@ -7,6 +7,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -75,6 +76,15 @@ private class RecordingPlatform : PushizoPlatform {
     override suspend fun inboxMarkAllRead(): Int { rec("inboxMarkAllRead"); return 3 }
     override suspend fun inboxArchive(id: String) = rec("inboxArchive $id")
     override suspend fun inboxUnreadCount(): Int { rec("inboxUnreadCount"); return 1 }
+
+    val card = PushizoContentCard(
+        "cc_1", "msg_1", PushizoContentCardType.CAPTIONED_IMAGE, "Yeni", null, null, "https://cdn/x.png", "Aç", emptyMap(),
+        pinned = true, priority = 50, viewed = false, clicked = false, expiresAt = null, createdAt = 1L,
+    )
+    override suspend fun contentCardsList(limit: Int): PushizoContentCardFeed { rec("cardsList $limit"); return PushizoContentCardFeed(listOf(card), 1) }
+    override suspend fun contentCardImpression(id: String): PushizoContentCard { rec("cardImpression $id"); return card.copy(viewed = true) }
+    override suspend fun contentCardClick(id: String): PushizoContentCard { rec("cardClick $id"); return card.copy(viewed = true, clicked = true) }
+    override suspend fun contentCardDismiss(id: String): PushizoContentCard { rec("cardDismiss $id"); return card }
 
     val preferencesResult = PushizoPreferencesResult(
         listOf(PushizoPreference("promo", null, optedIn = false, explicit = true, source = "sdk", updatedAt = 5L)),
@@ -234,6 +244,20 @@ class PushizoTest {
         runSuspending { Pushizo.Inbox.archive("inb_1") }
         assertEquals(1, runSuspending { Pushizo.Inbox.unreadCount() })
         assertEquals(listOf("inboxList 20 c1", "inboxMarkRead inb_1", "inboxMarkAllRead", "inboxArchive inb_1", "inboxUnreadCount"), fake.calls)
+    }
+
+    @Test
+    fun icerikKartlariPlatformaGiderVeDogrulanir() {
+        val feed = runSuspending { Pushizo.ContentCards.list(limit = 20) }
+        assertEquals(1, feed.unviewedCount)
+        assertEquals(PushizoContentCardType.CAPTIONED_IMAGE, feed.cards.single().type)
+        assertTrue(runSuspending { Pushizo.ContentCards.logImpression("cc_1") }.viewed)
+        assertTrue(runSuspending { Pushizo.ContentCards.logClick("cc_1") }.clicked)
+        runSuspending { Pushizo.ContentCards.dismiss("cc_1") }
+        assertEquals(listOf("cardsList 20", "cardImpression cc_1", "cardClick cc_1", "cardDismiss cc_1"), fake.calls)
+        assertFailsWith<IllegalArgumentException> { runSuspending { Pushizo.ContentCards.list(limit = 101) } }
+        assertFailsWith<IllegalArgumentException> { runSuspending { Pushizo.ContentCards.dismiss(" ") } }
+        assertEquals(PushizoContentCardType.CLASSIC, PushizoContentCardType.from("bilinmeyen"))
     }
 
     @Test

@@ -6,6 +6,9 @@ import com.pushizo.kmp.ios.PZClickEvent
 import com.pushizo.kmp.ios.PZFeatureFlags
 import com.pushizo.kmp.ios.PZForegroundEvent
 import com.pushizo.kmp.ios.PZInAppMessages
+import com.pushizo.kmp.ios.PZContentCard
+import com.pushizo.kmp.ios.PZContentCardFeed
+import com.pushizo.kmp.ios.PZContentCards
 import com.pushizo.kmp.ios.PZInbox
 import com.pushizo.kmp.ios.PZInboxItem
 import com.pushizo.kmp.ios.PZInboxPage
@@ -148,6 +151,27 @@ internal fun PZInboxItem.toCommon() = PushizoInboxItem(
     expiresAt = expiresAt().toEpochMillis(),
     createdAt = createdAt().toEpochMillis(),
 )
+
+internal fun PZContentCard.toCommon() = PushizoContentCard(
+    id = cardId(),
+    messageId = messageId(),
+    type = PushizoContentCardType.from(type()),
+    title = title(),
+    body = body(),
+    url = url(),
+    imageUrl = imageUrl(),
+    buttonText = buttonText(),
+    data = data().toStringMap(),
+    pinned = pinned(),
+    priority = priority().toInt(),
+    viewed = viewed(),
+    clicked = clicked(),
+    expiresAt = expiresAt().toEpochMillis(),
+    createdAt = createdAt().toEpochMillis(),
+)
+
+internal fun PZContentCardFeed.toCommon() =
+    PushizoContentCardFeed(cards().filterIsInstance<PZContentCard>().map { it.toCommon() }, unviewedCount().toInt())
 
 internal fun PZInboxPage.toCommon() =
     PushizoInboxPage(items().filterIsInstance<PZInboxItem>().map { it.toCommon() }, unreadCount().toInt(), nextCursor(), hasMore())
@@ -328,6 +352,18 @@ internal object IosPushizoPlatform : PushizoPlatform {
     }
 
     override suspend fun inboxUnreadCount(): Int = awaitResult<NSNumber> { done -> PZInbox.unreadCountWithCompletion(done) }.intValue
+
+    override suspend fun contentCardsList(limit: Int): PushizoContentCardFeed =
+        awaitResult<PZContentCardFeed> { done -> PZContentCards.listWithLimit(limit.toLong(), done) }.toCommon()
+
+    override suspend fun contentCardImpression(id: String): PushizoContentCard =
+        awaitResult<PZContentCard> { done -> PZContentCards.logImpression(id, done) }.toCommon()
+
+    override suspend fun contentCardClick(id: String): PushizoContentCard =
+        awaitResult<PZContentCard> { done -> PZContentCards.logClick(id, done) }.toCommon()
+
+    override suspend fun contentCardDismiss(id: String): PushizoContentCard =
+        awaitResult<PZContentCard> { done -> PZContentCards.dismiss(id, done) }.toCommon()
 
     override suspend fun getPreferences(): PushizoPreferencesResult =
         awaitResult<PZPreferencesResult> { done -> PZUser.getPreferencesWithCompletion(done) }.toCommon()

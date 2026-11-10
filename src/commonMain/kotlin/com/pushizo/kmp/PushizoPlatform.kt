@@ -68,6 +68,11 @@ internal interface PushizoPlatform {
     suspend fun inboxArchive(id: String)
     suspend fun inboxUnreadCount(): Int
 
+    suspend fun contentCardsList(limit: Int): PushizoContentCardFeed
+    suspend fun contentCardImpression(id: String): PushizoContentCard
+    suspend fun contentCardClick(id: String): PushizoContentCard
+    suspend fun contentCardDismiss(id: String): PushizoContentCard
+
     suspend fun getPreferences(): PushizoPreferencesResult
     suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult
 

@@ -5,6 +5,8 @@ import android.content.Context
 import com.pushizo.sdk.HsClickEvent
 import com.pushizo.sdk.HsConsent
 import com.pushizo.sdk.HsForegroundEvent
+import com.pushizo.sdk.HsContentCard
+import com.pushizo.sdk.HsContentCardFeed
 import com.pushizo.sdk.HsInboxItem
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
@@ -62,6 +64,13 @@ internal fun HsPushSubscriptionState.toCommon() = PushizoSubscriptionState(id, t
 internal fun HsInboxItem.toCommon() = PushizoInboxItem(id, messageId, title, body, url, imageUrl, data, read, readAt, archivedAt, expiresAt, createdAt)
 
 internal fun HsInboxPage.toCommon() = PushizoInboxPage(items.map { it.toCommon() }, unreadCount, nextCursor, hasMore)
+
+internal fun HsContentCard.toCommon() = PushizoContentCard(
+    id, messageId, PushizoContentCardType.from(type.wire), title, body, url, imageUrl, buttonText, data,
+    pinned, priority, viewed, clicked, expiresAt, createdAt,
+)
+
+internal fun HsContentCardFeed.toCommon() = PushizoContentCardFeed(cards.map { it.toCommon() }, unviewedCount)
 
 internal fun HsPreference.toCommon() = PushizoPreference(category, channel, optedIn, explicit, source, updatedAt)
 
@@ -179,6 +188,11 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override suspend fun inboxMarkAllRead(): Int = Native.Inbox.markAllRead()
     override suspend fun inboxArchive(id: String) = Native.Inbox.archive(id)
     override suspend fun inboxUnreadCount(): Int = Native.Inbox.unreadCount()
+
+    override suspend fun contentCardsList(limit: Int): PushizoContentCardFeed = Native.ContentCards.list(limit).toCommon()
+    override suspend fun contentCardImpression(id: String): PushizoContentCard = Native.ContentCards.logImpression(id).toCommon()
+    override suspend fun contentCardClick(id: String): PushizoContentCard = Native.ContentCards.logClick(id).toCommon()
+    override suspend fun contentCardDismiss(id: String): PushizoContentCard = Native.ContentCards.dismiss(id).toCommon()
 
     override suspend fun getPreferences(): PushizoPreferencesResult = Native.User.getPreferences().toCommon()
     override suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult =

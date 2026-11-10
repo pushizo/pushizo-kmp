@@ -132,6 +132,26 @@ object Pushizo {
         suspend fun unreadCount(): Int = platform.inboxUnreadCount()
     }
 
+    /** İçerik kartları (ADR-0082): gösterimde [logImpression], tıklamada [logClick], kapatmada [dismiss]. */
+    object ContentCards {
+        /** Kart akışı (sabitlenmiş → öncelik → yeni); [limit] 1–100. */
+        suspend fun list(limit: Int = 50): PushizoContentCardFeed {
+            require(limit in 1..100) { "limit 1-100 olmalı." }
+            return platform.contentCardsList(limit)
+        }
+        /** Kart ekranda gösterildi (ilk gösterim kaydedilir). */
+        suspend fun logImpression(id: String): PushizoContentCard = platform.contentCardImpression(requireId(id))
+        /** Karta tıklandı (gösterim de sayılır). */
+        suspend fun logClick(id: String): PushizoContentCard = platform.contentCardClick(requireId(id))
+        /** Kart kapatıldı; akıştan kalkar. */
+        suspend fun dismiss(id: String): PushizoContentCard = platform.contentCardDismiss(requireId(id))
+
+        private fun requireId(id: String): String {
+            require(id.isNotBlank()) { "Kart kimliği gerekli." }
+            return id
+        }
+    }
+
     /** Mesaj kategorisi tercihleri ve rıza kayıtları. */
     object Preferences {
         suspend fun get(): PushizoPreferencesResult = platform.getPreferences()

@@ -71,6 +71,40 @@ data class PushizoInboxItem(
     val createdAt: Long?,
 )
 
+/** İçerik kartı türü (ADR-0082); [wire] sunucudaki değerdir. */
+enum class PushizoContentCardType(val wire: String) {
+    CLASSIC("classic"),
+    CAPTIONED_IMAGE("captioned_image"),
+    IMAGE_ONLY("image_only");
+
+    companion object {
+        /** Bilinmeyen değer klasik kart sayılır. */
+        fun from(wire: String?): PushizoContentCardType = entries.firstOrNull { it.wire == wire } ?: CLASSIC
+    }
+}
+
+/** İçerik kartı (ADR-0082); kartlar bildirim kutusunda görünmez. Zamanlar epoch milisaniyedir. */
+data class PushizoContentCard(
+    val id: String,
+    val messageId: String?,
+    val type: PushizoContentCardType,
+    val title: String?,
+    val body: String?,
+    val url: String?,
+    val imageUrl: String?,
+    val buttonText: String?,
+    val data: Map<String, String>,
+    val pinned: Boolean,
+    val priority: Int,
+    val viewed: Boolean,
+    val clicked: Boolean,
+    val expiresAt: Long?,
+    val createdAt: Long?,
+)
+
+/** Kart akışı (sabitlenmiş → öncelik → yeni) ve görülmemiş kart sayısı. */
+data class PushizoContentCardFeed(val cards: List<PushizoContentCard>, val unviewedCount: Int)
+
 /** Bildirim kutusu sayfası (yeniden eskiye). */
 data class PushizoInboxPage(val items: List<PushizoInboxItem>, val unreadCount: Int, val nextCursor: String?, val hasMore: Boolean)
 
