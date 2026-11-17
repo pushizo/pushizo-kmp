@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "com.pushizo"
-version = "0.2.0"
+version = "0.3.0"
 
 /**
  * iOS hedefleri Pushizo.xcframework'ün Objective-C cephesini cinterop ile sarar (plan 13 Faz 29–30). Framework
@@ -51,7 +51,7 @@ kotlin {
     sourceSets {
         androidMain.dependencies {
             // `api`: Inbox gibi ortak API dışındaki yerel özellikler androidMain'den doğrudan çağrılabilir.
-            api("com.pushizo:pushizo-android:0.2.1")
+            api("com.pushizo:pushizo-android:0.3.0")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

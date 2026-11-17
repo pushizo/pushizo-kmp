@@ -19,9 +19,9 @@
 **Install from GitHub until then · O zamana kadar GitHub'dan kurulum:**
 
 ```bash
-git clone --branch 0.2.0 https://github.com/pushizo/pushizo-ios
+git clone --branch 0.3.0 https://github.com/pushizo/pushizo-ios
 pushizo-ios/scripts/build-xcframework.sh
-git clone --branch v0.2.0 https://github.com/pushizo/pushizo-kmp
+git clone --branch v0.3.0 https://github.com/pushizo/pushizo-kmp
 gradle -p pushizo-kmp publishToMavenLocal -Ppushizo.xcframework=$PWD/pushizo-ios/build/xcframework/Pushizo.xcframework
 ```
 
@@ -31,7 +31,7 @@ gradle -p pushizo-kmp publishToMavenLocal -Ppushizo.xcframework=$PWD/pushizo-ios
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api("com.pushizo:pushizo-kmp:0.2.0")
+            api("com.pushizo:pushizo-kmp:0.3.0")
         }
     }
 }
@@ -65,7 +65,7 @@ Ortak modülün `build.gradle.kts` dosyası:
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            api("com.pushizo:pushizo-kmp:0.2.0")
+            api("com.pushizo:pushizo-kmp:0.3.0")
         }
     }
 }
