@@ -9,6 +9,7 @@ package com.pushizo.kmp
  * Pushizo.User.addTag("plan", "pro")
  * Pushizo.Notifications.requestPermission(activity)
  * Pushizo.Session.sendEvent("purchase", mapOf("sku" to "a1"), value = 49.9)
+ * Pushizo.Chat.show(context)
  * ```
  */
 object Pushizo {
@@ -25,7 +26,11 @@ object Pushizo {
     fun login(externalId: String, identityHash: String? = null, jwt: String? = null) =
         platform.login(externalId, identityHash, jwt)
 
-    /** Kullanıcıyı kimliklendirir ve [profile] alanlarını tek çağrıda ayarlar. */
+    /**
+     * Kullanıcıyı kimliklendirir ve [profile] alanlarını tek çağrıda ayarlar (iki platformda da yerel profilli girişe
+     * gider). Geçersiz e-posta/telefon ya da kimlik kanıtında giriş yapılmaz ve `IllegalArgumentException`, SDK
+     * başlatılmadıysa `IllegalStateException` fırlatılır.
+     */
     fun login(externalId: String, profile: PushizoUserProfile, identityHash: String? = null, jwt: String? = null) =
         platform.login(externalId, profile, identityHash, jwt)
 
@@ -47,6 +52,16 @@ object Pushizo {
         fun addAliases(aliases: Map<String, String>) = platform.addAliases(aliases)
         fun removeAlias(label: String) = platform.removeAlias(label)
         fun setLanguage(code: String) = platform.setLanguage(code)
+
+        /**
+         * Kullanıcı özelliği yazar (ör. `setProperty("first_name", "Ali")`). [value] metin, sayı, mantıksal ya da bunların
+         * listesi/haritası olabilir; null özelliği siler. Boş anahtarda `IllegalArgumentException`. Çevrimdışıyken kuyrukta
+         * bekler. iOS yerel SDK'sı 64 karakterden uzun anahtarı ve içinde null bulunan liste/haritayı günlüğe yazıp yok sayar.
+         */
+        fun setProperty(key: String, value: Any?) {
+            require(key.isNotBlank()) { "Özellik anahtarı boş olamaz." }
+            platform.setProperty(key, value)
+        }
         fun addEmail(email: String) = platform.addEmail(email)
         fun removeEmail(email: String) = platform.removeEmail(email)
         fun addSms(phoneNumber: String) = platform.addSms(phoneNumber)
@@ -113,8 +128,9 @@ object Pushizo {
         fun removeNotification(androidNotificationId: Int) = platform.removeNotification(androidNotificationId)
 
         /**
-         * Tek bildirimi iOS istek kimliğiyle (`UNNotificationRequest.identifier`) kaldırır. Android'de değer sayıysa tepsi
-         * kimliği sayılır, değilse etkisizdir.
+         * Tek bildirimi kimliğiyle ([PushizoNotification.identifier]) kaldırır: iOS'ta istek kimliği
+         * (`UNNotificationRequest.identifier`), Android'de tepsi kimliğinin metin hâli. Android'de sayı olmayan değer
+         * etkisizdir.
          */
         fun removeNotification(identifier: String) = platform.removeNotification(identifier)
 
@@ -122,21 +138,47 @@ object Pushizo {
         fun removeGroupedNotifications(group: String) = platform.removeGroupedNotifications(group)
 
         /**
-         * Uygulama rozetini ayarlar (iOS; NSE ile paylaşılan sayaç da eşitlenir). Android'de rozet görünen bildirimlerden
-         * hesaplandığı için etkisizdir. Negatif değerde `IllegalArgumentException`.
+         * Uygulama rozetini ayarlar. iOS: rozet ayarlanır, NSE ile paylaşılan sayaç da eşitlenir. Android: başlatıcı rozeti
+         * için "sayıyı ayarla" API'si olmadığından sayı saklanır ve SDK'nın bundan sonra gösterdiği bildirimlere yazılır
+         * (sayı gösteren başlatıcılar, Android 8+). Negatif değerde `IllegalArgumentException`. Sonuç gerekiyorsa
+         * [setBadgeCountWithResult].
          */
         fun setBadgeCount(count: Int) {
-            require(count >= 0) { "count negatif olamaz." }
-            platform.setBadgeCount(count)
+            setBadgeCountWithResult(count)
         }
 
-        /** Rozeti sıfırlar (iOS); Android'de etkisizdir. */
-        fun clearBadge() = platform.setBadgeCount(0)
+        /**
+         * [setBadgeCount] ile aynıdır ve sonucu döndürür. Android: sayı saklandı ve rozet bu cihazda gösterilebiliyorsa true;
+         * Android 8 öncesinde, bildirimler kapalıyken, varsayılan kanalın rozeti kapatıldıysa ya da SDK başlatılmadıysa
+         * false. iOS: her zaman true.
+         */
+        fun setBadgeCountWithResult(count: Int): Boolean {
+            require(count >= 0) { "count negatif olamaz." }
+            return platform.setBadgeCount(count)
+        }
+
+        /** Rozeti sıfırlar (`setBadgeCount(0)`). */
+        fun clearBadge() {
+            platform.setBadgeCount(0)
+        }
+
+        /**
+         * Rozet sayısı. Android: [setBadgeCount] ile saklanan son sayı. iOS: uygulama simgesindeki rozet sayısı (ana iş
+         * parçacığından okunur).
+         */
+        val badgeCount: Int get() = platform.badgeCount
     }
 
     object Session {
         fun sendEvent(name: String, properties: Map<String, Any?> = emptyMap(), value: Double? = null) =
-            platform.sendEvent(name, properties, value)
+            platform.sendEvent(name, properties, value, null)
+
+        /**
+         * [eventId] ile olay gönderir: reklam pikseli/Conversions API ile aynı kimlik verilirse sunucu olayı tekilleştirir.
+         * Kimlik `^[A-Za-z0-9._:-]{8,64}$` biçiminde olmalıdır; geçersizse yerel SDK kendi kimliğini üretir.
+         */
+        fun sendEvent(name: String, properties: Map<String, Any?> = emptyMap(), value: Double? = null, eventId: String) =
+            platform.sendEvent(name, properties, value, eventId)
     }
 
     object InAppMessages {
@@ -156,8 +198,9 @@ object Pushizo {
             platform.addInAppClickListener(listener)
 
         /**
-         * In-app yaşam döngüsü (willDisplay/didDisplay/willDismiss/didDismiss). Android'de `initialize` sonrasında
-         * eklenmelidir. iOS'ta Objective-C cephesinde karşılığı olmadığından dinleyici kaydolur ama tetiklenmez.
+         * In-app yaşam döngüsü (willDisplay/didDisplay/willDismiss/didDismiss); iki platformda da ana iş parçacığında
+         * çağrılır. Android'de `initialize` sonrasında eklenmelidir. Dinleyici, dönen kayıt `remove()` edilene kadar
+         * köprüde tutulur.
          */
         fun addLifecycleListener(listener: PushizoInAppLifecycleListener): PushizoListenerRegistration =
             platform.addInAppLifecycleListener(listener)
@@ -190,7 +233,7 @@ object Pushizo {
     /**
      * Mobil reklam kimliği (GAID/IDFA; ADR-0037). SDK reklam kitaplığı içermez: kimliği uygulama alıp verir. Kimlik yalnızca
      * `ads_personalization` rızası olan kullanıcıda ve SHA-256 özetiyle reklam kitlesine gider; `null` sunucudaki kaydı siler.
-     * iOS'ta Objective-C cephesinde karşılığı olmadığından şimdilik etkisizdir (uyarı loglanır).
+     * Android'de GAID, iOS'ta IDFA verilir (iOS'ta ATT iznini uygulama alır).
      */
     object Ads {
         fun setAdvertisingId(id: String?) = platform.setAdvertisingId(id)
@@ -198,6 +241,8 @@ object Pushizo {
 
     object Location {
         val isShared: Boolean get() = platform.locationShared
+
+        /** Konum izni verilmiş mi (Android ön plan izni; iOS "kullanırken" veya "her zaman"). İstem göstermez. */
         val permissionGranted: Boolean get() = platform.locationPermissionGranted
         fun setShared(shared: Boolean) = platform.setLocationShared(shared)
         fun requestPermission(host: PushizoPermissionHost, rationale: String? = null) =
@@ -266,16 +311,14 @@ object Pushizo {
         ) = platform.showDeliveryGuidance(host, setting, message?.takeIf { it.isNotBlank() }, onResult)
     }
 
-    /** Bildirim kutusu (`add_to_inbox` mesajları). Kullanıcı ve abonelik yoksa çağrılar hata fırlatır. */
     /**
-     * Canlı sohbet (ADR-0040). Android'de yerel `Pushizo.Chat`'e devreder. iOS'ta Objective-C cephesinde sohbet
-     * olmadığından henüz bağlı değildir: [isSupported] false, [visitorId] null, [unreadCount] 0, [isListening] false,
-     * [attachmentUrl] null döner; dinleyiciler kaydolur ama tetiklenmez, [setTyping]/[startListening]/[stopListening]
-     * etkisizdir ve değer döndüren `suspend` çağrılar `UnsupportedOperationException` atar. Çağırmadan önce
-     * [isSupported] denetlenir.
+     * Canlı sohbet (ADR-0040). Android'de yerel `Pushizo.Chat`'e, iOS'ta Objective-C cephesindeki `PZChat`'e devreder.
+     * Kendi arayüzünüz için veri API'si ([start], [getMessages], [sendMessage], [addListener] …), hazır ekran için
+     * [show] / [hide] kullanılır. SDK başlatılmadıysa değer döndüren çağrılar `IllegalStateException`, geçersiz girdi
+     * `IllegalArgumentException` fırlatır.
      */
     object Chat {
-        /** Sohbet bu platformda bağlı mı (Android true, iOS false). */
+        /** Sohbet bu platformda bağlı mı (Android ve iOS'ta true). */
         val isSupported: Boolean get() = platform.chatSupported
         val visitorId: String? get() = platform.chatVisitorId
 
@@ -322,10 +365,97 @@ object Pushizo {
         fun startListening() = platform.chatStartListening()
         fun stopListening() = platform.chatStopListening()
 
-        /** Ek indirme/görüntüleme adresi; sohbetin bağlı olmadığı platformda null. */
+        /**
+         * Ek indirme/görüntüleme adresi (ziyaretçi belirtecini taşır; loglamayın). SDK başlatılmadıysa
+         * `IllegalStateException`.
+         */
         fun attachmentUrl(attachmentId: String, download: Boolean = false): String? = platform.chatAttachmentUrl(attachmentId, download)
+
+        /**
+         * Hazır sohbet ekranını açar; ekran zaten açıksa yenisi açılmaz. Android: `HsChatActivity` başlatılır ([context]
+         * Activity değilse yeni görevde). iOS: etkin sahnenin en üstteki görünüm denetleyicisinden modal sunulur
+         * (`PushizoApplicationContext` verilir). SDK başlatılmadıysa hiçbir şey yapılmaz.
+         */
+        fun show(context: PushizoContext) = platform.chatShow(context, null, true)
+
+        /**
+         * Hazır sohbet ekranını [host] üzerinden açar: Android'de Activity ile aynı görevde, iOS'ta verilen görünüm
+         * denetleyicisinden modal ([animated] yalnızca iOS'ta kullanılır).
+         */
+        fun show(host: PushizoPermissionHost, animated: Boolean = true) = platform.chatShow(null, host, animated)
+
+        /** [show] ile açılan sohbet ekranını kapatır; açık bir ekran varsa true ([animated] yalnızca iOS'ta kullanılır). */
+        fun hide(animated: Boolean = true): Boolean = platform.chatHide(animated)
+
+        /**
+         * Hazır sohbet ekranı şu an açık mı. iOS'ta yerel değerdir. Android'de yerel karşılığı olmadığından köprü sohbet
+         * ekranının yaşam döngüsünü izler: izleme köprünün `initialize` ya da [show] çağrısıyla başlar, öncesinde false
+         * döner.
+         */
+        val isPresented: Boolean get() = platform.chatPresented
     }
 
+    /**
+     * iOS Live Activities (ADR-0024), genel `PushizoDefaultLiveActivityAttributes` türüyle. Yalnızca iOS'ta etkilidir;
+     * Android'de [isSupported] false, [defaultActivityType] null döner ve çağrılar hiçbir şey yapmadan false döner.
+     * ActivityKit genelleri (`register`, `startTracking`) Swift'ten kullanılır.
+     */
+    object LiveActivities {
+        private val ACTIVITY_ID = Regex("^[A-Za-z0-9_.:-]{1,100}$")
+
+        /** Sunucunun uzaktan başlatmada `attributes` içine yazdığı ayrılmış anahtar. */
+        private const val RESERVED_KEY = "pushizo"
+
+        /** Live Activities bu platformda var mı (iOS true, Android false). iOS sürümü ayrıca denetlenir (16.1+). */
+        val isSupported: Boolean get() = platform.liveActivitiesSupported
+
+        /** Genel türün sunucudaki `activity_type` değeri; Android'de null. */
+        val defaultActivityType: String? get() = platform.defaultLiveActivityType
+
+        /**
+         * Genel türü izlemeye alır: push-to-start belirteci (iOS 17.2+) ve başlayan her etkinliğin güncelleme belirteci
+         * sunucuya kaydedilir. `initialize` sonrasında, uygulama her açıldığında çağrılır. iOS'ta kayıt yapıldıysa true;
+         * SDK başlatılmadıysa `IllegalStateException`, iOS 16.1 öncesinde ve Mac Catalyst'te
+         * `UnsupportedOperationException`. Android'de etkisizdir ve false döner.
+         */
+        fun setupDefaultLiveActivity(): Boolean = platform.setupDefaultLiveActivity()
+
+        /**
+         * Genel türle yerel bir etkinlik başlatır (iOS 16.1+); sunucu sonraki `update`/`end` çağrılarını [activityId] ile
+         * yapar. [activityId] 1-100 karakter (harf, rakam ve `_ . : -`); değerler metin, sonlu sayı veya mantıksal;
+         * anahtarlar 1-64 karakter; [attributes] içinde `pushizo` anahtarı ayrılmıştır. Kurala uymayan girdi iki platformda
+         * da `IllegalArgumentException` fırlatır. iOS'ta etkinlik başladıysa true; SDK başlatılmadıysa
+         * `IllegalStateException`, sürüm desteklemiyorsa `UnsupportedOperationException`, sistem reddettiyse
+         * `RuntimeException`. Android'de etkisizdir ve false döner.
+         */
+        fun startDefaultLiveActivity(
+            activityId: String,
+            attributes: Map<String, Any> = emptyMap(),
+            contentState: Map<String, Any> = emptyMap(),
+        ): Boolean {
+            require(ACTIVITY_ID.matches(activityId)) { "activityId 1-100 karakter olmalı (harf, rakam ve _ . : -)." }
+            checkValues(attributes, "attributes", RESERVED_KEY)
+            checkValues(contentState, "contentState", null)
+            return platform.startDefaultLiveActivity(activityId, attributes, contentState)
+        }
+
+        private fun checkValues(values: Map<String, Any>, name: String, reservedKey: String?) {
+            for ((key, value) in values) {
+                require(key.length in 1..64) { "$name anahtarları 1-64 karakter olmalı." }
+                require(key != reservedKey) { "$name içinde '$reservedKey' anahtarı ayrılmıştır." }
+                val valid = when (value) {
+                    is String, is Boolean -> true
+                    is Float -> value.isFinite()
+                    is Double -> value.isFinite()
+                    is Number -> true
+                    else -> false
+                }
+                require(valid) { "$name.$key metin, sonlu sayı veya mantıksal olmalı." }
+            }
+        }
+    }
+
+    /** Bildirim kutusu (`add_to_inbox` mesajları). Kullanıcı ve abonelik yoksa çağrılar hata fırlatır. */
     object Inbox {
         /** Öğeler (yeniden eskiye), okunmamış sayısı ve sonraki sayfa imleci; [limit] 1–200. */
         suspend fun list(limit: Int = 50, cursor: String? = null): PushizoInboxPage = platform.inboxList(limit, cursor)
@@ -334,6 +464,13 @@ object Pushizo {
         suspend fun markAllRead(): Int = platform.inboxMarkAllRead()
         suspend fun archive(id: String) = platform.inboxArchive(id)
         suspend fun unreadCount(): Int = platform.inboxUnreadCount()
+
+        /**
+         * Kutu değişim gözlemcisi (ana iş parçacığında): `read`, `read_all` ve `archived` her zaman, `listed` ve `count`
+         * yalnızca okunmamış sayısı değiştiğinde bildirilir. Dönen kayıt `remove()` ile kaldırılır.
+         */
+        fun addObserver(observer: (PushizoInboxChangeEvent) -> Unit): PushizoListenerRegistration =
+            platform.addInboxObserver(observer)
     }
 
     /** İçerik kartları (ADR-0082): gösterimde [logImpression], tıklamada [logClick], kapatmada [dismiss]. */
@@ -371,5 +508,11 @@ object Pushizo {
         fun isEnabled(key: String, default: Boolean = false): Boolean = platform.isFeatureEnabled(key, default)
         /** Bayrağın değeri (metin, sayı, mantıksal, `Map` veya `List`); değer yoksa [default]. */
         fun getValue(key: String, default: Any? = null): Any? = platform.featureFlagValue(key) ?: default
+
+        /**
+         * Bayrak değerleri sunucudan her başarıyla yenilendiğinde (oturum başı ve [refresh]) ana iş parçacığında çağrılır;
+         * güncel değerler [isEnabled] / [getValue] ile okunur. Dönen kayıt `remove()` ile kaldırılır.
+         */
+        fun addObserver(observer: () -> Unit): PushizoListenerRegistration = platform.addFeatureFlagObserver(observer)
     }
 }

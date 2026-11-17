@@ -1,7 +1,10 @@
 package com.pushizo.kmp
 
 import android.app.Activity
+import android.app.Application
 import android.content.Context
+import android.os.Bundle
+import com.pushizo.sdk.HsChatActivity
 import com.pushizo.sdk.HsChatConfig
 import com.pushizo.sdk.HsChatConversation
 import com.pushizo.sdk.HsChatConversationState
@@ -19,13 +22,16 @@ import com.pushizo.sdk.HsContentCardFeed
 import com.pushizo.sdk.HsDeliveryRisk
 import com.pushizo.sdk.HsDeliverySetting
 import com.pushizo.sdk.HsDeliveryStatus
+import com.pushizo.sdk.HsFeatureFlagObserver
 import com.pushizo.sdk.HsInAppAction
 import com.pushizo.sdk.HsInAppBlock
 import com.pushizo.sdk.HsInAppClickEvent
 import com.pushizo.sdk.HsInAppLifecycleEvent
 import com.pushizo.sdk.HsInAppLifecycleListener
 import com.pushizo.sdk.HsInAppMessage
+import com.pushizo.sdk.HsInboxChangeEvent
 import com.pushizo.sdk.HsInboxItem
+import com.pushizo.sdk.HsInboxObserver
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
 import com.pushizo.sdk.HsMessageCategory
@@ -36,6 +42,8 @@ import com.pushizo.sdk.HsPreferencesResult
 import com.pushizo.sdk.HsPushSubscriptionState
 import com.pushizo.sdk.HsUserProfile
 import com.pushizo.sdk.Pushizo as Native
+import java.lang.ref.WeakReference
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import org.json.JSONArray
@@ -73,13 +81,18 @@ internal fun HsNotification.toCommon() = PushizoNotification(
     messageId = messageId,
     actions = actions.map { PushizoNotificationAction(it.id, it.title, it.url) },
     data = data,
-).also { it.androidNotificationId = androidNotificationId }
+).also {
+    it.androidNotificationId = androidNotificationId
+    it.identifier = androidNotificationId.toString()
+}
 
 internal fun HsClickEvent.toCommon() = PushizoClickEvent(notification.toCommon(), actionId, url)
 
 internal fun HsPushSubscriptionState.toCommon() = PushizoSubscriptionState(id, token, optedIn, permission)
 
 internal fun HsInboxItem.toCommon() = PushizoInboxItem(id, messageId, title, body, url, imageUrl, data, read, readAt, archivedAt, expiresAt, createdAt)
+
+internal fun HsInboxChangeEvent.toCommon() = PushizoInboxChangeEvent(type, itemId, unreadCount)
 
 internal fun HsInboxPage.toCommon() = PushizoInboxPage(items.map { it.toCommon() }, unreadCount, nextCursor, hasMore)
 
@@ -203,6 +216,37 @@ internal class AndroidChatListener(private val listener: PushizoChatListener) : 
     override fun onError(code: String, message: String?) = listener.onError(code, message)
 }
 
+/**
+ * Hazır sohbet ekranının ([HsChatActivity]) açık olup olmadığını izler. Yerel SDK'da `isPresented` karşılığı olmadığından
+ * uygulamanın Activity yaşam döngüsü dinlenir; izleme [attach] ile başlar (köprünün `initialize` ve `Chat.show` çağrıları).
+ */
+internal object AndroidChatPresence : Application.ActivityLifecycleCallbacks {
+    private val attached = AtomicBoolean(false)
+    @Volatile private var current: WeakReference<Activity>? = null
+
+    val isPresented: Boolean
+        get() = current?.get()?.let { !it.isFinishing && !it.isDestroyed } ?: false
+
+    fun attach(context: Context?) {
+        val application = context?.applicationContext as? Application ?: return
+        if (attached.compareAndSet(false, true)) application.registerActivityLifecycleCallbacks(this)
+    }
+
+    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+        if (activity is HsChatActivity) current = WeakReference(activity)
+    }
+
+    override fun onActivityDestroyed(activity: Activity) {
+        if (current?.get() === activity) current = null
+    }
+
+    override fun onActivityStarted(activity: Activity) = Unit
+    override fun onActivityResumed(activity: Activity) = Unit
+    override fun onActivityPaused(activity: Activity) = Unit
+    override fun onActivityStopped(activity: Activity) = Unit
+    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+}
+
 /** Ortak yaşam döngüsü dinleyicisini yerel dinleyiciye uyarlar. */
 internal class AndroidInAppLifecycleListener(private val listener: PushizoInAppLifecycleListener) : HsInAppLifecycleListener {
     private fun HsInAppLifecycleEvent.common() = PushizoInAppLifecycleEvent(message.toCommon())
@@ -232,8 +276,10 @@ private class AndroidForegroundEvent(private val event: HsForegroundEvent) : Pus
 internal object AndroidPushizoPlatform : PushizoPlatform {
     override val isInitialized: Boolean get() = Native.isInitialized
 
-    override fun initialize(context: PushizoContext, appId: String, options: PushizoOptions) =
+    override fun initialize(context: PushizoContext, appId: String, options: PushizoOptions) {
         Native.initialize(context, appId, options.toNative())
+        AndroidChatPresence.attach(context)
+    }
 
     override fun setConsentGiven(given: Boolean) = Native.setConsentGiven(given)
     override fun login(externalId: String, identityHash: String?, jwt: String?) = Native.login(externalId, identityHash, jwt)
@@ -250,6 +296,7 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override fun addAliases(aliases: Map<String, String>) = Native.User.addAliases(aliases)
     override fun removeAlias(label: String) = Native.User.removeAlias(label)
     override fun setLanguage(code: String) = Native.User.setLanguage(code)
+    override fun setProperty(key: String, value: Any?) = Native.User.setProperty(key, value)
     override fun addEmail(email: String) = Native.User.addEmail(email)
     override fun removeEmail(email: String) = Native.User.removeEmail(email)
     override fun addSms(phoneNumber: String) = Native.User.addSms(phoneNumber)
@@ -302,13 +349,14 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
 
     override fun removeGroupedNotifications(group: String) = Native.Notifications.removeGroupedNotifications(group)
 
-    /** Android'de rozet görünen bildirimlerden hesaplanır; ayarlanacak bir sayaç yoktur. */
-    override fun setBadgeCount(count: Int) = Unit
+    /** Sayı yerel SDK'da saklanır ve sonraki bildirimlere yazılır; rozet bu cihazda gösterilebiliyorsa true. */
+    override fun setBadgeCount(count: Int): Boolean = Native.Notifications.setBadgeCount(count)
+    override val badgeCount: Int get() = Native.Notifications.badgeCount
 
     override fun setAdvertisingId(id: String?) = Native.Ads.setAdvertisingId(id)
 
-    override fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?) =
-        Native.Session.sendEvent(name, properties, value)
+    override fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?, eventId: String?) =
+        if (eventId != null) Native.Session.sendEvent(name, properties, value, eventId) else Native.Session.sendEvent(name, properties, value)
 
     override fun addTriggers(triggers: Map<String, String>) = Native.InAppMessages.addTriggers(triggers)
     override fun removeTriggers(keys: Collection<String>) = Native.InAppMessages.removeTriggers(keys)
@@ -374,6 +422,12 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override suspend fun inboxArchive(id: String) = Native.Inbox.archive(id)
     override suspend fun inboxUnreadCount(): Int = Native.Inbox.unreadCount()
 
+    override fun addInboxObserver(observer: (PushizoInboxChangeEvent) -> Unit): PushizoListenerRegistration {
+        val native = HsInboxObserver { observer(it.toCommon()) }
+        Native.Inbox.addObserver(native)
+        return PushizoListenerRegistration { Native.Inbox.removeObserver(native) }
+    }
+
     override suspend fun contentCardsList(limit: Int): PushizoContentCardFeed = Native.ContentCards.list(limit).toCommon()
     override suspend fun contentCardImpression(id: String): PushizoContentCard = Native.ContentCards.logImpression(id).toCommon()
     override suspend fun contentCardClick(id: String): PushizoContentCard = Native.ContentCards.logClick(id).toCommon()
@@ -426,7 +480,29 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override fun chatStopListening() = Native.Chat.stopListening()
     override fun chatAttachmentUrl(attachmentId: String, download: Boolean): String? = Native.Chat.attachmentUrl(attachmentId, download)
 
+    /** Activity verilirse ekran aynı görevde, yalnızca bağlam verilirse yeni görevde açılır ([animated] iOS'a özgüdür). */
+    override fun chatShow(context: PushizoContext?, host: PushizoPermissionHost?, animated: Boolean) {
+        val target: Context = host ?: context ?: return
+        AndroidChatPresence.attach(target)
+        Native.Chat.show(target)
+    }
+
+    override fun chatHide(animated: Boolean): Boolean = Native.Chat.hide()
+    override val chatPresented: Boolean get() = AndroidChatPresence.isPresented
+
+    // Live Activities yalnızca iOS'ta vardır: tür yok, çağrılar etkisiz false.
+    override val liveActivitiesSupported: Boolean get() = false
+    override val defaultLiveActivityType: String? get() = null
+    override fun setupDefaultLiveActivity(): Boolean = false
+    override fun startDefaultLiveActivity(activityId: String, attributes: Map<String, Any>, contentState: Map<String, Any>): Boolean = false
+
     override suspend fun refreshFeatureFlags(): Boolean = suspendCoroutine { cont -> Native.FeatureFlags.refresh { cont.resume(it) } }
     override fun isFeatureEnabled(key: String, default: Boolean): Boolean = Native.FeatureFlags.isEnabled(key, default)
     override fun featureFlagValue(key: String): Any? = Native.FeatureFlags.getValue(key).toCommonJson()
+
+    override fun addFeatureFlagObserver(observer: () -> Unit): PushizoListenerRegistration {
+        val native = HsFeatureFlagObserver { observer() }
+        Native.FeatureFlags.addObserver(native)
+        return PushizoListenerRegistration { Native.FeatureFlags.removeObserver(native) }
+    }
 }

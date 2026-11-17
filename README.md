@@ -137,7 +137,9 @@ Pushizo.Delivery.openSettings(context, PushizoDeliverySetting.AUTO_START) // ken
 
 Gömülü yerleşimler (`Pushizo.Placements`), canlı sohbet (`Pushizo.Chat`), in-app tıklama ve yaşam döngüsü dinleyicileri, reklam
 kişiselleştirme rızası (`Pushizo.User.setAdsPersonalizationConsent`, `getConsents`), reklam kimliği (`Pushizo.Ads`), rozet,
-bildirim kaldırma, arka plan konum izni ve ADM kaydı da ortak API'dedir:
+bildirim kaldırma, arka plan konum izni, ADM kaydı, kullanıcı özellikleri (`Pushizo.User.setProperty`), bayrak ve kutu
+gözlemcileri, hazır sohbet ekranı (`Pushizo.Chat.show`) ve Live Activities'in genel türü (`Pushizo.LiveActivities`) de ortak
+API'dedir:
 
 ```kotlin
 // Gömülü yerleşim: model döner, çizim sizindir
@@ -155,24 +157,71 @@ Pushizo.Notifications.setBadgeCount(3)
 Pushizo.Notifications.removeGroupedNotifications("siparis")
 Pushizo.Location.requestBackgroundPermission(activity)
 
-// Canlı sohbet
-if (Pushizo.Chat.isSupported) {
-    Pushizo.Chat.addListener(object : PushizoChatListener {
-        override fun onMessage(message: PushizoChatMessage) { /* … */ }
-    })
-    Pushizo.Chat.start(name = "Ali")
-    Pushizo.Chat.sendMessage("Merhaba")
+// Canlı sohbet (kendi arayüzünüz için veri API'si)
+val chat = Pushizo.Chat.addListener(object : PushizoChatListener {
+    override fun onMessage(message: PushizoChatMessage) { /* … */ }
+})
+Pushizo.Chat.start(name = "Ali")
+Pushizo.Chat.sendMessage("Merhaba")
+```
+
+Tek platformlu çağrılar diğer platformda zararsızdır: `registerAdm` ve sayısal kimlikle `removeNotification` yalnızca Android'de
+etkilidir. Tek bildirim iki platformda da `removeNotification(notification.identifier)` ile kaldırılır (iOS istek kimliği, Android
+tepsi kimliğinin metin hâli). `requestBackgroundPermission` ile `requestAlwaysPermission` aynı izni ister; konum izni durumu
+(`permissionGranted`, `backgroundPermissionGranted`) yerel SDK'dan okunur.
+
+Canlı sohbet, `Ads.setAdvertisingId` (Android GAID, iOS IDFA) ve in-app yaşam döngüsü dinleyicisi iki platformda da yerel SDK'ya
+bağlıdır; `Pushizo.Chat.isSupported` ikisinde de `true` döner. Sohbette SDK başlatılmadıysa değer döndüren çağrılar
+`IllegalStateException`, geçersiz girdi `IllegalArgumentException` fırlatır.
+
+Kullanıcı özellikleri, profille giriş, olay kimliği, gözlemciler ve rozet sonucu:
+
+```kotlin
+Pushizo.User.setProperty("first_name", "Ali")                 // metin, sayı, mantıksal, liste, harita; null siler
+Pushizo.login("user_42", PushizoUserProfile(email = "ali@ornek.com", tags = mapOf("plan" to "pro")))
+Pushizo.Session.sendEvent("purchase", mapOf("sku" to "a1"), value = 49.9, eventId = "order_10042")
+
+val flags = Pushizo.FeatureFlags.addObserver { /* değerler yenilendi */ }
+val inbox = Pushizo.Inbox.addObserver { event -> println("${event.type} ${event.itemId} ${event.unreadCount}") }
+flags.remove()
+inbox.remove()
+
+val shown = Pushizo.Notifications.setBadgeCountWithResult(3)   // Android: rozet gösterilebiliyor mu; iOS: true
+val count = Pushizo.Notifications.badgeCount
+```
+
+`setProperty` boş anahtarda `IllegalArgumentException` fırlatır; iOS yerel SDK'sı 64 karakterden uzun anahtarı ve içinde `null`
+bulunan liste/haritayı günlüğe yazıp yok sayar. Profilli `login` iki platformda da yerel çağrıya gider: geçersiz profilde giriş
+yapılmaz ve `IllegalArgumentException`, SDK başlatılmadıysa `IllegalStateException` fırlatılır. `eventId` 8-64 karakterdir (harf,
+rakam ve `. _ : -`); geçersizse yerel SDK kendi kimliğini üretir. Gözlemciler ana iş parçacığında çağrılır;
+`PushizoInboxChangeEvent.type`: `listed`, `read`, `read_all`, `archived`, `count`. Rozet Android'de de yerel SDK'ya gider: sayı
+saklanır ve SDK'nın bundan sonra gösterdiği bildirimlere yazılır (Android 8+); `badgeCount` Android'de saklanan sayıyı, iOS'ta
+uygulama simgesindeki rozeti verir.
+
+Hazır sohbet ekranı ve Live Activities:
+
+```kotlin
+Pushizo.Chat.show(context)            // Android: Context · iOS: PushizoApplicationContext
+Pushizo.Chat.show(host)               // Android: Activity · iOS: UIViewController
+if (Pushizo.Chat.isPresented) Pushizo.Chat.hide()
+
+if (Pushizo.LiveActivities.isSupported) {                      // yalnızca iOS
+    Pushizo.LiveActivities.setupDefaultLiveActivity()
+    Pushizo.LiveActivities.startDefaultLiveActivity("order_42", mapOf("title" to "Sipariş"), mapOf("step" to 2))
 }
 ```
 
-Tek platformlu çağrılar diğer platformda zararsızdır: rozet yalnızca iOS'ta, `registerAdm` ve sayısal kimlikle
-`removeNotification` yalnızca Android'de etkilidir; `requestBackgroundPermission` ile `requestAlwaysPermission` aynı izni ister.
+`Chat.show` Android'de `HsChatActivity` ekranını, iOS'ta modal sohbet ekranını açar; `hide()` açık bir ekran varsa `true` döner.
+`isPresented` iOS'ta yerel değerdir; Android'de yerel karşılığı olmadığından köprü sohbet ekranının yaşam döngüsünü izler (izleme
+köprünün `initialize` ya da `show` çağrısıyla başlar). `Pushizo.LiveActivities` yalnızca iOS'ta etkilidir (genel tür, iOS 16.1+):
+geçersiz girdi `IllegalArgumentException`, başlatılmamış SDK `IllegalStateException`, desteklemeyen sürüm
+`UnsupportedOperationException` fırlatır; Android'de `isSupported` `false`, `defaultActivityType` `null` döner ve çağrılar hiçbir
+şey yapmadan `false` döner.
 
-iOS'ta henüz bağlı olmayanlar (Objective-C cephesinde karşılığı yok): canlı sohbet, `Ads.setAdvertisingId` ve in-app yaşam
-döngüsü dinleyicisi. Bu çağrılar iOS'ta etkisizdir; `Pushizo.Chat.isSupported` `false` döner ve değer döndüren `suspend` sohbet
-çağrıları `UnsupportedOperationException` atar.
-
-Özel in-app çizici (`setRenderer`), Live Activities ve `Uri` ile sohbet eki ortak API'de yok. Android'de `api` bağımlılığı sayesinde `androidMain` içinden `com.pushizo.sdk.Pushizo` ile doğrudan çağrılır.
+Yerel görünüm ve türe bağlı olanlar ortak API'de yok: özel in-app çizici (`setRenderer`), gömülebilir sohbet ve içerik kartı
+görünümleri, kendi `ActivityAttributes` türlerinizle Live Activities ve `Uri` ile sohbet eki. Android'de `api` bağımlılığı sayesinde
+`androidMain` içinden `com.pushizo.sdk.Pushizo`, iOS'ta `iosMain` içinden `com.pushizo.kmp.ios` (Objective-C cephesi) ile
+doğrudan çağrılır.
 
 ## Geliştirme
 

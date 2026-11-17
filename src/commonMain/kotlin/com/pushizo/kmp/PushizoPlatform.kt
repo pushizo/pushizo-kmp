@@ -23,6 +23,8 @@ internal interface PushizoPlatform {
     fun addAliases(aliases: Map<String, String>)
     fun removeAlias(label: String)
     fun setLanguage(code: String)
+    /** Kullanıcı özelliği; [value] metin, sayı, mantıksal, liste, harita veya null (null siler). */
+    fun setProperty(key: String, value: Any?)
     fun addEmail(email: String)
     fun removeEmail(email: String)
     fun addSms(phoneNumber: String)
@@ -51,13 +53,19 @@ internal interface PushizoPlatform {
     /** iOS istek kimliğiyle kaldırır; Android'de sayısal kimlikse tepsi kimliği sayılır, değilse etkisiz. */
     fun removeNotification(identifier: String)
     fun removeGroupedNotifications(group: String)
-    /** Uygulama rozeti (yalnızca iOS; Android'de etkisiz). */
-    fun setBadgeCount(count: Int)
+    /**
+     * Uygulama rozeti. Android: sayı saklanır ve sonraki bildirimlere yazılır; rozet bu cihazda gösterilebiliyorsa true.
+     * iOS: rozet ayarlanır ve true döner.
+     */
+    fun setBadgeCount(count: Int): Boolean
+    /** Android: `setBadgeCount` ile saklanan son sayı; iOS: uygulama simgesindeki rozet sayısı. */
+    val badgeCount: Int
 
     /** Mobil reklam kimliği (ADR-0037). */
     fun setAdvertisingId(id: String?)
 
-    fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?)
+    /** [eventId] tekilleştirme kimliği; null ya da geçersizse yerel SDK kendi kimliğini üretir. */
+    fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?, eventId: String?)
 
     fun addTriggers(triggers: Map<String, String>)
     fun removeTriggers(keys: Collection<String>)
@@ -95,6 +103,7 @@ internal interface PushizoPlatform {
     suspend fun inboxMarkAllRead(): Int
     suspend fun inboxArchive(id: String)
     suspend fun inboxUnreadCount(): Int
+    fun addInboxObserver(observer: (PushizoInboxChangeEvent) -> Unit): PushizoListenerRegistration
 
     suspend fun contentCardsList(limit: Int): PushizoContentCardFeed
     suspend fun contentCardImpression(id: String): PushizoContentCard
@@ -104,7 +113,7 @@ internal interface PushizoPlatform {
     suspend fun getPreferences(): PushizoPreferencesResult
     suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult
 
-    /** Canlı sohbet bu platformda bağlı mı (Android true; iOS'ta Objective-C cephesinde sohbet olmadığından false). */
+    /** Canlı sohbet bu platformda bağlı mı (Android ve iOS'ta true). */
     val chatSupported: Boolean
     val chatVisitorId: String?
     val chatUnreadCount: Int
@@ -126,11 +135,26 @@ internal interface PushizoPlatform {
     fun chatStopListening()
     /** Ek adresi; sohbetin bağlı olmadığı platformda null. */
     fun chatAttachmentUrl(attachmentId: String, download: Boolean): String?
+    /**
+     * Hazır sohbet ekranını açar. Android: [host] (Activity) ya da [context] ile `HsChatActivity`; iOS: [host] sunan görünüm
+     * denetleyicisidir (null ise en üstteki). [animated] yalnızca iOS'ta kullanılır.
+     */
+    fun chatShow(context: PushizoContext?, host: PushizoPermissionHost?, animated: Boolean)
+    /** Hazır sohbet ekranını kapatır; açık bir ekran varsa true. */
+    fun chatHide(animated: Boolean): Boolean
+    val chatPresented: Boolean
+
+    /** Live Activities (yalnızca iOS). Android'de desteklenmez: tür null, çağrılar etkisiz false. */
+    val liveActivitiesSupported: Boolean
+    val defaultLiveActivityType: String?
+    fun setupDefaultLiveActivity(): Boolean
+    fun startDefaultLiveActivity(activityId: String, attributes: Map<String, Any>, contentState: Map<String, Any>): Boolean
 
     suspend fun refreshFeatureFlags(): Boolean
     fun isFeatureEnabled(key: String, default: Boolean): Boolean
     /** Metin, sayı, mantıksal, `Map<String, Any?>` veya `List<Any?>`; değer yoksa null. */
     fun featureFlagValue(key: String): Any?
+    fun addFeatureFlagObserver(observer: () -> Unit): PushizoListenerRegistration
 }
 
 internal expect fun createPushizoPlatform(): PushizoPlatform

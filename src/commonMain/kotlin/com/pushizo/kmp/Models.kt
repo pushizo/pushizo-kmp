@@ -42,6 +42,14 @@ data class PushizoNotification(
      */
     var androidNotificationId: Int? = null
         internal set
+
+    /**
+     * `Notifications.removeNotification(identifier)` için bildirim kimliği: iOS'ta istek kimliği
+     * (`UNNotificationRequest.identifier`), Android'de tepsi kimliğinin metin hâli. Kimlik bilinmiyorsa null. Kurucuya
+     * [androidNotificationId] ile aynı nedenle eklenmedi.
+     */
+    var identifier: String? = null
+        internal set
 }
 
 /** Bildirim tıklaması. [actionId] düğmeye basıldıysa dolar. */
@@ -77,6 +85,20 @@ data class PushizoInboxItem(
     val expiresAt: Long?,
     val createdAt: Long?,
 )
+
+/**
+ * Bildirim kutusu değişim olayı (`Inbox.addObserver`). [type]: [LISTED], [READ], [READ_ALL], [ARCHIVED] veya [COUNT];
+ * [itemId] yalnızca tek öğe olaylarında (`read`, `archived`) doludur; [unreadCount] güncel okunmamış sayısıdır.
+ */
+data class PushizoInboxChangeEvent(val type: String, val itemId: String?, val unreadCount: Int) {
+    companion object {
+        const val LISTED = "listed"
+        const val READ = "read"
+        const val READ_ALL = "read_all"
+        const val ARCHIVED = "archived"
+        const val COUNT = "count"
+    }
+}
 
 /** İçerik kartı türü (ADR-0082); [wire] sunucudaki değerdir. */
 enum class PushizoContentCardType(val wire: String) {
@@ -286,7 +308,7 @@ data class PushizoInAppClickEvent(val messageId: String, val actionId: String, v
 /** In-app yaşam döngüsü olayı. */
 data class PushizoInAppLifecycleEvent(val message: PushizoInAppMessage)
 
-/** In-app yaşam döngüsü dinleyicisi; varsayılan gövdeler boştur. iOS'ta henüz tetiklenmez (bkz. `InAppMessages.addLifecycleListener`). */
+/** In-app yaşam döngüsü dinleyicisi; varsayılan gövdeler boştur. Geri çağrılar ana iş parçacığında gelir. */
 interface PushizoInAppLifecycleListener {
     fun onWillDisplay(event: PushizoInAppLifecycleEvent) {}
     fun onDidDisplay(event: PushizoInAppLifecycleEvent) {}
@@ -364,7 +386,7 @@ data class PushizoChatConfig(
 /** Sohbet bildirimi tıklaması (`Chat.addOpenListener`). */
 data class PushizoChatPushInfo(val conversationId: String, val seq: Long)
 
-/** Canlı sohbet olayları; varsayılan gövdeler boştur. Geri çağrılar arka plan iş parçacığında gelebilir. */
+/** Canlı sohbet olayları; varsayılan gövdeler boştur. Geri çağrılar ana iş parçacığında gelir. */
 interface PushizoChatListener {
     fun onMessage(message: PushizoChatMessage) {}
     fun onTyping(typing: Boolean, name: String?) {}

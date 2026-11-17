@@ -35,6 +35,7 @@ private class RecordingPlatform : PushizoPlatform {
     override fun addAliases(aliases: Map<String, String>) = rec("addAliases $aliases")
     override fun removeAlias(label: String) = rec("removeAlias $label")
     override fun setLanguage(code: String) = rec("language $code")
+    override fun setProperty(key: String, value: Any?) = rec("property $key $value")
     override fun addEmail(email: String) = rec("addEmail $email")
     override fun removeEmail(email: String) = rec("removeEmail $email")
     override fun addSms(phoneNumber: String) = rec("addSms $phoneNumber")
@@ -61,9 +62,12 @@ private class RecordingPlatform : PushizoPlatform {
     override fun removeNotification(androidNotificationId: Int) = rec("removeNotificationId $androidNotificationId")
     override fun removeNotification(identifier: String) = rec("removeNotification $identifier")
     override fun removeGroupedNotifications(group: String) = rec("removeGroup $group")
-    override fun setBadgeCount(count: Int) = rec("badge $count")
+    var badgeResult = true
+    override fun setBadgeCount(count: Int): Boolean { rec("badge $count"); badgeCount = count; return badgeResult }
+    override var badgeCount = 0
     override fun setAdvertisingId(id: String?) = rec("adId $id")
-    override fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?) = rec("event $name $properties $value")
+    override fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?, eventId: String?) =
+        rec("event $name $properties $value" + (eventId?.let { " $it" } ?: ""))
     override fun addTriggers(triggers: Map<String, String>) = rec("addTriggers $triggers")
     override fun removeTriggers(keys: Collection<String>) = rec("removeTriggers $keys")
     override fun clearTriggers() = rec("clearTriggers")
@@ -120,6 +124,11 @@ private class RecordingPlatform : PushizoPlatform {
     override suspend fun inboxMarkAllRead(): Int { rec("inboxMarkAllRead"); return 3 }
     override suspend fun inboxArchive(id: String) = rec("inboxArchive $id")
     override suspend fun inboxUnreadCount(): Int { rec("inboxUnreadCount"); return 1 }
+    val inboxObservers = mutableListOf<(PushizoInboxChangeEvent) -> Unit>()
+    override fun addInboxObserver(observer: (PushizoInboxChangeEvent) -> Unit): PushizoListenerRegistration {
+        inboxObservers += observer
+        return PushizoListenerRegistration { inboxObservers -= observer }
+    }
 
     val card = PushizoContentCard(
         "cc_1", "msg_1", PushizoContentCardType.CAPTIONED_IMAGE, "Yeni", null, null, "https://cdn/x.png", "Aç", emptyMap(),
@@ -194,11 +203,37 @@ private class RecordingPlatform : PushizoPlatform {
     override fun chatStopListening() { rec("chatStop"); chatIsListening = false }
     override fun chatAttachmentUrl(attachmentId: String, download: Boolean): String? =
         if (chatAvailable) "https://api/chat/attachments/$attachmentId?download=$download" else null
+    override var chatPresented = false
+    override fun chatShow(context: PushizoContext?, host: PushizoPermissionHost?, animated: Boolean) {
+        rec("chatShow context=${context != null} host=${host != null} $animated")
+        chatPresented = true
+    }
+    override fun chatHide(animated: Boolean): Boolean {
+        rec("chatHide $animated")
+        return chatPresented.also { chatPresented = false }
+    }
+
+    var liveActivities = true
+    override val liveActivitiesSupported: Boolean get() = liveActivities
+    override val defaultLiveActivityType: String? get() = if (liveActivities) "PushizoDefaultLiveActivityAttributes" else null
+    override fun setupDefaultLiveActivity(): Boolean { rec("liveSetup"); return liveActivities }
+    override fun startDefaultLiveActivity(activityId: String, attributes: Map<String, Any>, contentState: Map<String, Any>): Boolean {
+        rec("liveStart $activityId $attributes $contentState")
+        return liveActivities
+    }
 
     override suspend fun refreshFeatureFlags(): Boolean { rec("flagsRefresh"); return true }
     override fun isFeatureEnabled(key: String, default: Boolean) = if (key == "yeni_sepet") true else default
     override fun featureFlagValue(key: String): Any? = if (key == "limit") 3 else null
+    val flagObservers = mutableListOf<() -> Unit>()
+    override fun addFeatureFlagObserver(observer: () -> Unit): PushizoListenerRegistration {
+        flagObservers += observer
+        return PushizoListenerRegistration { flagObservers -= observer }
+    }
 }
+
+/** Sohbet ekranı çağrıları için platforma özgü başlatma bağlamı (Android `Context`, iOS `PushizoApplicationContext`). */
+internal expect fun testContext(): PushizoContext
 
 /** Sahte platform eşzamanlı tamamlandığı için askıya alınan çağrı ek bağımlılık olmadan çalıştırılır. */
 private fun <T> runSuspending(block: suspend () -> T): T {
@@ -572,6 +607,134 @@ class PushizoTest {
         fake.chatAvailable = false
         assertFalse(Pushizo.Chat.isSupported)
         assertEquals(null, Pushizo.Chat.attachmentUrl("att_1"))
+    }
+
+    @Test
+    fun kullaniciOzelligiDogrulanirVePlatformaGider() {
+        Pushizo.User.setProperty("first_name", "Ali")
+        Pushizo.User.setProperty("age", 34)
+        Pushizo.User.setProperty("vip", true)
+        Pushizo.User.setProperty("ilgi", listOf("spor", "müzik"))
+        Pushizo.User.setProperty("adres", mapOf("il" to "İzmir"))
+        Pushizo.User.setProperty("eski", null)
+        assertEquals(
+            listOf("property first_name Ali", "property age 34", "property vip true", "property ilgi [spor, müzik]", "property adres {il=İzmir}", "property eski null"),
+            fake.calls,
+        )
+        assertFailsWith<IllegalArgumentException> { Pushizo.User.setProperty(" ", "x") }
+        assertEquals(6, fake.calls.size)
+    }
+
+    @Test
+    fun rozetSonucuVeSayisi() {
+        assertTrue(Pushizo.Notifications.setBadgeCountWithResult(4))
+        assertEquals(4, Pushizo.Notifications.badgeCount)
+        fake.badgeResult = false
+        assertFalse(Pushizo.Notifications.setBadgeCountWithResult(2))
+        // Eski imza (Unit) korunur ve aynı platform çağrısına gider.
+        val unit: Unit = Pushizo.Notifications.setBadgeCount(7)
+        assertEquals(Unit, unit)
+        Pushizo.Notifications.clearBadge()
+        assertEquals(0, Pushizo.Notifications.badgeCount)
+        assertEquals(listOf("badge 4", "badge 2", "badge 7", "badge 0"), fake.calls)
+        assertFailsWith<IllegalArgumentException> { Pushizo.Notifications.setBadgeCountWithResult(-1) }
+        assertEquals(4, fake.calls.size)
+    }
+
+    @Test
+    fun olayKimligiIstegeBagliVeEskiImzaKorunur() {
+        Pushizo.Session.sendEvent("purchase", mapOf("sku" to "a1"), 49.9, eventId = "ord_12345678")
+        Pushizo.Session.sendEvent("view", eventId = "evt-0001.a:b")
+        Pushizo.Session.sendEvent("view")
+        assertEquals(listOf("event purchase {sku=a1} 49.9 ord_12345678", "event view {} null evt-0001.a:b", "event view {} null"), fake.calls)
+    }
+
+    @Test
+    fun bayrakVeKutuGozlemcileriKaldirilabilir() {
+        var flagChanges = 0
+        val flags = Pushizo.FeatureFlags.addObserver { flagChanges++ }
+        fake.flagObservers.forEach { it() }
+        fake.flagObservers.forEach { it() }
+        assertEquals(2, flagChanges)
+        flags.remove()
+        flags.remove()
+        assertTrue(fake.flagObservers.isEmpty())
+
+        val events = mutableListOf<PushizoInboxChangeEvent>()
+        val inbox = Pushizo.Inbox.addObserver { events += it }
+        val read = PushizoInboxChangeEvent(PushizoInboxChangeEvent.READ, "inb_1", 2)
+        val all = PushizoInboxChangeEvent(PushizoInboxChangeEvent.READ_ALL, null, 0)
+        fake.inboxObservers.forEach { it(read); it(all) }
+        assertEquals(listOf(read, all), events)
+        inbox.remove()
+        assertTrue(fake.inboxObservers.isEmpty())
+        assertEquals(
+            listOf("listed", "read", "read_all", "archived", "count"),
+            listOf(
+                PushizoInboxChangeEvent.LISTED, PushizoInboxChangeEvent.READ, PushizoInboxChangeEvent.READ_ALL,
+                PushizoInboxChangeEvent.ARCHIVED, PushizoInboxChangeEvent.COUNT,
+            ),
+        )
+    }
+
+    @Test
+    fun sohbetEkraniAcilirKapanir() {
+        assertFalse(Pushizo.Chat.isPresented)
+        Pushizo.Chat.show(testContext())
+        assertTrue(Pushizo.Chat.isPresented)
+        assertTrue(Pushizo.Chat.hide())
+        assertFalse(Pushizo.Chat.isPresented)
+        assertFalse(Pushizo.Chat.hide(animated = false))
+        val host = testPermissionHost()
+        Pushizo.Chat.show(host)
+        Pushizo.Chat.show(host, animated = false)
+        assertEquals(
+            listOf(
+                "chatShow context=true host=false true", "chatHide true", "chatHide false",
+                "chatShow context=false host=true true", "chatShow context=false host=true false",
+            ),
+            fake.calls,
+        )
+    }
+
+    @Test
+    fun canliEtkinliklerDogrulanirVePlatformaGider() {
+        assertTrue(Pushizo.LiveActivities.isSupported)
+        assertEquals("PushizoDefaultLiveActivityAttributes", Pushizo.LiveActivities.defaultActivityType)
+        assertTrue(Pushizo.LiveActivities.setupDefaultLiveActivity())
+        assertTrue(Pushizo.LiveActivities.startDefaultLiveActivity("order_42", mapOf("title" to "Sipariş"), mapOf("step" to 2, "done" to false)))
+        assertTrue(Pushizo.LiveActivities.startDefaultLiveActivity("a.b:c-d"))
+        val expected = listOf("liveSetup", "liveStart order_42 {title=Sipariş} {step=2, done=false}", "liveStart a.b:c-d {} {}")
+        assertEquals(expected, fake.calls)
+
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("") }
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("geçersiz kimlik") }
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("x".repeat(101)) }
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("a", attributes = mapOf("pushizo" to "x")) }
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("a", attributes = mapOf("" to "x")) }
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("a", contentState = mapOf("k".repeat(65) to "x")) }
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("a", contentState = mapOf("k" to listOf(1))) }
+        assertFailsWith<IllegalArgumentException> { Pushizo.LiveActivities.startDefaultLiveActivity("a", contentState = mapOf("k" to Double.NaN)) }
+        // `pushizo` anahtarı yalnızca attributes içinde ayrılmıştır.
+        assertTrue(Pushizo.LiveActivities.startDefaultLiveActivity("a", contentState = mapOf("pushizo" to "x")))
+        assertEquals(expected.size + 1, fake.calls.size)
+
+        // Desteklemeyen platform (Android): tür yok, çağrılar etkisiz false.
+        fake.liveActivities = false
+        assertFalse(Pushizo.LiveActivities.isSupported)
+        assertEquals(null, Pushizo.LiveActivities.defaultActivityType)
+        assertFalse(Pushizo.LiveActivities.setupDefaultLiveActivity())
+        assertFalse(Pushizo.LiveActivities.startDefaultLiveActivity("order_42"))
+    }
+
+    @Test
+    fun bildirimKimligiVarsayilanBos() {
+        val notification = PushizoNotification(null, null, null, null, null, null, null, emptyList(), emptyMap())
+        assertEquals(null, notification.identifier)
+        notification.identifier = "req_1"
+        assertEquals("req_1", notification.identifier)
+        // Kimlik eşitliğe ve kurucuya girmez (ikili uyumluluk).
+        assertEquals(notification, notification.copy())
     }
 
     @Test

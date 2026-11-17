@@ -23,6 +23,7 @@ import com.pushizo.sdk.HsDeliveryRisk
 import com.pushizo.sdk.HsDeliverySetting
 import com.pushizo.sdk.HsDeliveryStatus
 import com.pushizo.sdk.HsDeviceVendor
+import com.pushizo.sdk.HsInboxChangeEvent
 import com.pushizo.sdk.HsStandbyBucket
 import com.pushizo.sdk.HsLog
 import com.pushizo.sdk.HsNotification
@@ -36,6 +37,8 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 internal actual fun testPermissionHost(): PushizoPermissionHost = android.app.Activity()
+
+internal actual fun testContext(): PushizoContext = android.app.Activity()
 
 class AndroidPlatformTest {
     private val notification = HsNotification(
@@ -307,8 +310,9 @@ class AndroidPlatformTest {
         assertEquals(0, AndroidPushizoPlatform.chatUnreadCount)
         assertFalse(AndroidPushizoPlatform.chatIsListening)
         assertFalse(AndroidPushizoPlatform.locationBackgroundPermissionGranted)
-        // Android'de rozet sayacı yoktur; bildirim kaldırma ve reklam kimliği başlatılmadan etkisizdir.
-        AndroidPushizoPlatform.setBadgeCount(5)
+        // Rozet yerel SDK'ya gider: başlatılmadan sayı saklanamaz (false) ve okunan değer 0'dır.
+        assertFalse(AndroidPushizoPlatform.setBadgeCount(5))
+        assertEquals(0, AndroidPushizoPlatform.badgeCount)
         AndroidPushizoPlatform.removeNotification(42)
         AndroidPushizoPlatform.removeNotification("42")
         AndroidPushizoPlatform.removeNotification("ios-istek-kimligi")
@@ -322,6 +326,66 @@ class AndroidPlatformTest {
 
     @Test
     fun `bildirim tepsi kimliği ortak modele taşınır`() {
-        assertEquals(notification.androidNotificationId, notification.toCommon().androidNotificationId)
+        val common = notification.toCommon()
+        assertEquals(notification.androidNotificationId, common.androidNotificationId)
+        // Metin kimlik, `removeNotification(identifier)` çağrısının Android'de kabul ettiği tepsi kimliğidir.
+        assertEquals(notification.androidNotificationId.toString(), common.identifier)
+        assertEquals(notification.androidNotificationId, common.identifier?.toIntOrNull())
+    }
+
+    @Test
+    fun `kutu değişim olayı ortak modele çevrilir ve tür adları yerel SDK ile aynıdır`() {
+        assertEquals(PushizoInboxChangeEvent("read", "inb_1", 2), HsInboxChangeEvent(HsInboxChangeEvent.READ, "inb_1", 2).toCommon())
+        assertEquals(PushizoInboxChangeEvent("count", null, 0), HsInboxChangeEvent(HsInboxChangeEvent.COUNT, null, 0).toCommon())
+        assertEquals(
+            listOf(HsInboxChangeEvent.LISTED, HsInboxChangeEvent.READ, HsInboxChangeEvent.READ_ALL, HsInboxChangeEvent.ARCHIVED, HsInboxChangeEvent.COUNT),
+            listOf(
+                PushizoInboxChangeEvent.LISTED, PushizoInboxChangeEvent.READ, PushizoInboxChangeEvent.READ_ALL,
+                PushizoInboxChangeEvent.ARCHIVED, PushizoInboxChangeEvent.COUNT,
+            ),
+        )
+    }
+
+    @Test
+    fun `gözlemciler yerel SDK başlatılmadan eklenip kaldırılabilir`() {
+        val flags = AndroidPushizoPlatform.addFeatureFlagObserver { }
+        flags.remove()
+        flags.remove()
+        val inbox = AndroidPushizoPlatform.addInboxObserver { }
+        inbox.remove()
+        inbox.remove()
+    }
+
+    @Test
+    fun `hazır sohbet ekranı başlatılmadan zararsızdır`() {
+        assertFalse(AndroidPushizoPlatform.chatPresented)
+        assertFalse(AndroidChatPresence.isPresented)
+        // Yerel SDK başlatılmadıysa ekran açılmaz; bağlam ve Activity verilmezse çağrı yok sayılır.
+        AndroidPushizoPlatform.chatShow(null, null, animated = true)
+        AndroidPushizoPlatform.chatShow(android.app.Activity(), null, animated = true)
+        AndroidPushizoPlatform.chatShow(null, android.app.Activity(), animated = false)
+        assertFalse(AndroidPushizoPlatform.chatHide(animated = true))
+        assertFalse(AndroidPushizoPlatform.chatPresented)
+    }
+
+    @Test
+    fun `sohbet ekranı izleyicisi yalnızca sohbet Activity'sini sayar`() {
+        // Başka bir Activity'nin yaşam döngüsü durumu değiştirmez.
+        val other = android.app.Activity()
+        AndroidChatPresence.onActivityCreated(other, null)
+        assertFalse(AndroidChatPresence.isPresented)
+        AndroidChatPresence.onActivityDestroyed(other)
+        assertFalse(AndroidChatPresence.isPresented)
+        // Uygulama bağlamı olmayan bağlamda izleme başlatılmaz (çökmez).
+        AndroidChatPresence.attach(null)
+        AndroidChatPresence.attach(other)
+    }
+
+    @Test
+    fun `live activities android'de desteklenmez ve çağrılar etkisizdir`() {
+        assertFalse(AndroidPushizoPlatform.liveActivitiesSupported)
+        assertNull(AndroidPushizoPlatform.defaultLiveActivityType)
+        assertFalse(AndroidPushizoPlatform.setupDefaultLiveActivity())
+        assertFalse(AndroidPushizoPlatform.startDefaultLiveActivity("order_42", mapOf("title" to "Sipariş"), mapOf("step" to 2)))
     }
 }

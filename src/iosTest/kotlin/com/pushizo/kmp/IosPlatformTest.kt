@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.pushizo.kmp
 
 import platform.Foundation.NSDate
@@ -5,7 +7,11 @@ import platform.Foundation.NSError
 import platform.Foundation.NSLocalizedDescriptionKey
 import platform.Foundation.NSNull
 import platform.Foundation.NSNumber
+import platform.Foundation.NSRunLoop
 import platform.Foundation.dateWithTimeIntervalSince1970
+import platform.Foundation.dateWithTimeIntervalSinceNow
+import platform.Foundation.runUntilDate
+import platform.Foundation.timeIntervalSince1970
 import platform.UserNotifications.UNAuthorizationStatusAuthorized
 import platform.UserNotifications.UNAuthorizationStatusDenied
 import platform.UserNotifications.UNAuthorizationStatusNotDetermined
@@ -15,6 +21,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.startCoroutine
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
@@ -23,11 +30,20 @@ import kotlin.test.assertTrue
 /** iOS köprüsü: Objective-C cephesinden gelen Foundation türlerinin ortak modele çevrilmesi ve gerçek cepheyle çağrılar. */
 internal actual fun testPermissionHost(): PushizoPermissionHost = platform.UIKit.UIViewController()
 
-/** Sahte olmayan platformda askıya alınan çağrıyı eşzamanlı çalıştırır (desteklenmeyen sohbet çağrıları hemen hata verir). */
-private fun <T> runNow(block: suspend () -> T): Result<T> {
+internal actual fun testContext(): PushizoContext = PushizoApplicationContext
+
+/**
+ * Gerçek cephede askıya alınan çağrıyı tamamlanana kadar bekler. Cephe completion block'larını ana kuyruğa gönderdiğinden
+ * (testler ana iş parçacığında koşar) ana çalışma döngüsü sonuç gelene kadar döndürülür.
+ */
+private fun <T> awaitOnMainRunLoop(block: suspend () -> T): Result<T> {
     var result: Result<T>? = null
     block.startCoroutine(Continuation(EmptyCoroutineContext) { result = it })
-    return checkNotNull(result) { "askıya alınan çağrı eşzamanlı tamamlanmadı" }
+    val deadline = NSDate().timeIntervalSince1970 + 15
+    while (result == null && NSDate().timeIntervalSince1970 < deadline) {
+        NSRunLoop.mainRunLoop.runUntilDate(NSDate.dateWithTimeIntervalSinceNow(0.02))
+    }
+    return checkNotNull(result) { "askıya alınan çağrı 15 sn içinde tamamlanmadı" }
 }
 
 class IosPlatformTest {
@@ -41,6 +57,10 @@ class IosPlatformTest {
         assertIs<IllegalArgumentException>(invalid)
         assertEquals("mesaj 4", invalid.message)
         assertIs<RuntimeException>(error(5).toKotlinException())
+        // Platformun desteklemediği özellik (ör. iOS 16.1 öncesinde Live Activities) ve sistem reddi.
+        assertIs<UnsupportedOperationException>(error(6).toKotlinException())
+        assertFalse(error(7).toKotlinException() is UnsupportedOperationException)
+        assertIs<RuntimeException>(error(7).toKotlinException())
         assertIs<RuntimeException>(error(1, "NSURLErrorDomain").toKotlinException())
     }
 
@@ -102,32 +122,149 @@ class IosPlatformTest {
     }
 
     @Test
-    fun sohbetIosTaBagliDegilVeZararsizdir() {
-        assertFalse(IosPushizoPlatform.chatSupported)
+    fun sohbetIosTaBagliVeBaslatilmadanAndroidIleAyniHatalariVerir() {
+        // Gerçek `PZChat` cephesi: durum özellikleri yerelden okunur.
+        assertTrue(IosPushizoPlatform.chatSupported)
         assertNull(IosPushizoPlatform.chatVisitorId)
         assertEquals(0, IosPushizoPlatform.chatUnreadCount)
         assertFalse(IosPushizoPlatform.chatIsListening)
-        assertNull(IosPushizoPlatform.chatAttachmentUrl("att_1", download = false))
-        IosPushizoPlatform.chatSetTyping(true)
-        IosPushizoPlatform.chatStartListening()
-        IosPushizoPlatform.chatStopListening()
-        assertFalse(IosPushizoPlatform.chatIsListening)
-        IosPushizoPlatform.addChatListener(object : PushizoChatListener {}).remove()
+        val listener = IosPushizoPlatform.addChatListener(object : PushizoChatListener {})
+        listener.remove()
+        listener.remove()
         IosPushizoPlatform.addChatOpenListener { }.remove()
-        // Değer döndürmesi gereken çağrılar sahte sonuç üretmez: açık bir "desteklenmiyor" hatası verir.
-        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatStart(null, null, null) }.exceptionOrNull())
-        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatSendMessage("Selam", null) }.exceptionOrNull())
-        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatGetMessages(null, null, 50) }.exceptionOrNull())
-        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatMarkRead(1) }.exceptionOrNull())
+        // SDK başlatılmadan değer döndüren çağrılar cephenin `notInitialized` hatasını `IllegalStateException` olarak verir.
+        assertIs<IllegalStateException>(awaitOnMainRunLoop { IosPushizoPlatform.chatStart("Ali", null, "tr") }.exceptionOrNull())
+        assertIs<IllegalStateException>(awaitOnMainRunLoop { IosPushizoPlatform.chatGetMessages(5, null, 50) }.exceptionOrNull())
+        assertIs<IllegalStateException>(awaitOnMainRunLoop { IosPushizoPlatform.chatSendMessage("Selam", null) }.exceptionOrNull())
+        assertIs<IllegalStateException>(awaitOnMainRunLoop { IosPushizoPlatform.chatSendAttachment(byteArrayOf(1, 2, 3), "a.png", "image/png", null) }.exceptionOrNull())
+        assertIs<IllegalStateException>(awaitOnMainRunLoop { IosPushizoPlatform.chatMarkRead(1) }.exceptionOrNull())
+        assertIs<IllegalStateException>(awaitOnMainRunLoop { IosPushizoPlatform.chatGetConfig(null) }.exceptionOrNull())
+        assertFailsWith<IllegalStateException> { IosPushizoPlatform.chatAttachmentUrl("att_1", download = false) }
     }
 
-    @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
     @Test
-    fun cephedeOlmayanVeAndroideOzguCagrilarEtkisizdir() {
+    fun hazirSohbetEkraniAcikDegilkenKapatmaZararsizdir() {
+        assertFalse(IosPushizoPlatform.chatPresented)
+        assertFalse(IosPushizoPlatform.chatHide(animated = false))
+        assertFalse(IosPushizoPlatform.chatPresented)
+    }
+
+    @Test
+    fun sohbetOlayiTureGoreOrtakDinleyiciyeAktarilir() {
+        val seen = mutableListOf<String>()
+        val listener = object : PushizoChatListener {
+            override fun onMessage(message: PushizoChatMessage) { seen += "message ${message.seq}" }
+            override fun onTyping(typing: Boolean, name: String?) { seen += "typing $typing $name" }
+            override fun onAgentRead(seq: Long) { seen += "read $seq" }
+            override fun onUnreadCountChanged(count: Int) { seen += "unread $count" }
+            override fun onConversationUpdated(conversationId: String, status: String, botActive: Boolean) { seen += "conversation $conversationId $status $botActive" }
+            override fun onConnectionChanged(connected: Boolean) { seen += "connection $connected" }
+            override fun onError(code: String, message: String?) { seen += "error $code $message" }
+        }
+        val message = PushizoChatMessage("m", 3, null, "bot", null, "x", emptyList(), null, "sent", null)
+        listener.dispatchChatEvent("message", message = message)
+        listener.dispatchChatEvent("message")
+        listener.dispatchChatEvent("typing", typing = true, name = "Ayşe")
+        listener.dispatchChatEvent("read", seq = 3)
+        listener.dispatchChatEvent("unread", unreadCount = 1)
+        listener.dispatchChatEvent("conversation", conversationId = "conv_1", status = "resolved", botActive = false)
+        listener.dispatchChatEvent("connection", connected = true)
+        listener.dispatchChatEvent("error", code = "stream", errorMessage = "koptu")
+        listener.dispatchChatEvent("bilinmeyen")
+        assertEquals(
+            listOf("message 3", "typing true Ayşe", "read 3", "unread 1", "conversation conv_1 resolved false", "connection true", "error stream koptu"),
+            seen,
+        )
+    }
+
+    @Test
+    fun ozellikDegeriVeProfilFoundationTurlerineCevrilir() {
+        assertNull(null.toObjCPropertyValue())
+        assertEquals("Ali", "Ali".toObjCPropertyValue())
+        assertEquals(34, 34.toObjCPropertyValue())
+        assertEquals(true, true.toObjCPropertyValue())
+        // Koleksiyon içindeki null `NSNull` olur; iç içe harita ve liste özyinelemeli çevrilir.
+        val nested = mapOf("il" to "İzmir", "kat" to null, "etiketler" to listOf("a", null, mapOf(1 to 2.5))).toObjCPropertyValue()
+        assertEquals(mapOf<Any?, Any?>("il" to "İzmir", "kat" to NSNull.`null`(), "etiketler" to listOf("a", NSNull.`null`(), mapOf<Any?, Any?>("1" to 2.5))), nested)
+        assertEquals(listOf<Any?>("x", 1), arrayOf<Any?>("x", 1).toObjCPropertyValue())
+        assertEquals("HIGH", PushizoDeliveryRisk.HIGH.toObjCPropertyValue())
+
+        val profile = PushizoUserProfile("a@ornek.com", "+905551112233", mapOf("p" to "1"), mapOf("crm" to "c1")).toNative()
+        assertEquals("a@ornek.com", profile.email())
+        assertEquals("+905551112233", profile.sms())
+        assertEquals(mapOf("p" to "1"), profile.tags().toStringMap())
+        assertEquals(mapOf("crm" to "c1"), profile.aliases().toStringMap())
+        val empty = PushizoUserProfile().toNative()
+        assertNull(empty.email())
+        assertTrue(empty.tags().isEmpty())
+
+        assertEquals(3UL, byteArrayOf(1, 2, 3).toNSData().length)
+        assertEquals(0UL, ByteArray(0).toNSData().length)
+    }
+
+    @Test
+    fun gercekCepheIleYeniCagrilarBaslatilmadanZararsizdir() {
+        // Kullanıcı özelliği, reklam kimliği ve kimlikli olay yerel SDK'ya gider; başlatılmadan kuyruk yoktur, çökmez.
+        IosPushizoPlatform.setProperty("first_name", "Ali")
+        IosPushizoPlatform.setProperty("adres", mapOf("il" to "İzmir", "kat" to 3))
+        // İç içe null `NSNull` olarak gider; yerel SDK bu değeri günlüğe yazıp yok sayar (çökmez).
+        IosPushizoPlatform.setProperty("etiketler", listOf("a", null))
+        IosPushizoPlatform.setProperty("eski", null)
         IosPushizoPlatform.setAdvertisingId("38400000-8cf0-11bd-b23e-10b96e40000d")
+        IosPushizoPlatform.setAdvertisingId(null)
+        IosPushizoPlatform.sendEvent("purchase", mapOf("sku" to "a1"), 49.9, "ord_12345678")
+        IosPushizoPlatform.sendEvent("view", emptyMap(), null, null)
+        // Gözlemciler: kayıt ve kaldırma (birden çok kez) çökmeden çalışır.
+        val flags = IosPushizoPlatform.addFeatureFlagObserver { }
+        flags.remove()
+        flags.remove()
+        val inbox = IosPushizoPlatform.addInboxObserver { }
+        inbox.remove()
+        inbox.remove()
+        // Konum izni yerel SDK'dan okunur (istem gösterilmez).
+        assertFalse(IosPushizoPlatform.locationPermissionGranted)
+        assertFalse(IosPushizoPlatform.locationBackgroundPermissionGranted)
+    }
+
+    @Test
+    fun profilliGirisYerelCagriyaGiderVeBaslatilmadanHataVerir() {
+        val profile = PushizoUserProfile(email = "ali@ornek.com", tags = mapOf("plan" to "pro"))
+        val error = assertFailsWith<IllegalStateException> { IosPushizoPlatform.login("user_42", profile, null, null) }
+        assertTrue(error.message.orEmpty().isNotBlank())
+        // Giriş yapılmadı: köprü artık alanları ayrı ayrı eklemez.
+        assertNull(IosPushizoPlatform.externalId)
+        assertTrue(IosPushizoPlatform.emails.isEmpty())
+        assertTrue(IosPushizoPlatform.getTags().isEmpty())
+    }
+
+    @Test
+    fun uygulamaIciYasamDongusuDinleyicisiKaldirilanaKadarTutulur() {
+        // Cephe dinleyiciyi zayıf tutar; köprü uyarlayıcıyı kayıt kaldırılana kadar güçlü tutar.
+        val before = IosPushizoPlatform.retainedLifecycleListenerCount
+        val first = IosPushizoPlatform.addInAppLifecycleListener(object : PushizoInAppLifecycleListener {})
+        val second = IosPushizoPlatform.addInAppLifecycleListener(object : PushizoInAppLifecycleListener {})
+        assertEquals(before + 2, IosPushizoPlatform.retainedLifecycleListenerCount)
+        first.remove()
+        first.remove()
+        assertEquals(before + 1, IosPushizoPlatform.retainedLifecycleListenerCount)
+        second.remove()
+        assertEquals(before, IosPushizoPlatform.retainedLifecycleListenerCount)
+    }
+
+    @Test
+    fun canliEtkinliklerGenelTurleBaglidirVeBaslatilmadanHataVerir() {
+        assertTrue(IosPushizoPlatform.liveActivitiesSupported)
+        assertTrue(IosPushizoPlatform.defaultLiveActivityType.orEmpty().isNotBlank())
+        assertFailsWith<IllegalStateException> { IosPushizoPlatform.setupDefaultLiveActivity() }
+        assertFailsWith<IllegalStateException> {
+            IosPushizoPlatform.startDefaultLiveActivity("order_42", mapOf("title" to "Sipariş"), mapOf("step" to 2, "done" to false))
+        }
+    }
+
+    @Test
+    fun androideOzguCagrilarEtkisizdirVeElleKurulanYerlesimRaporlanmaz() {
         IosPushizoPlatform.registerAdm("amzn1.adm-registration.v3.x")
         IosPushizoPlatform.removeNotification(42)
-        IosPushizoPlatform.addInAppLifecycleListener(object : PushizoInAppLifecycleListener {}).remove()
         // Elle kurulan (cephe nesnesi olmayan) yerleşim mesajında raporlama yok sayılır.
         val message = PushizoInAppMessage("iam_1", null, "modal", "blocks", null, null, null, dismissible = true, blocks = emptyList())
         assertNull(message.nativeIos())
@@ -138,7 +275,7 @@ class IosPlatformTest {
 
     @Test
     fun gercekCepheIleInAppTiklamaDinleyicisiVeArkaPlanIzni() {
-        // Gerçek Objective-C cephesi: dinleyici kaydı/kaldırma ve CoreLocation yetki okuması çökmeden çalışır.
+        // Gerçek Objective-C cephesi: dinleyici kaydı/kaldırma ve yerel konum izni okuması çökmeden çalışır.
         val registration = IosPushizoPlatform.addInAppClickListener { }
         registration.remove()
         registration.remove()
