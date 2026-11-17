@@ -62,6 +62,12 @@ internal interface PushizoPlatform {
     val geofencingEnabled: Boolean
     fun setGeofencingEnabled(enabled: Boolean)
 
+    /** Android teslimat güçlendirme (ADR-0092). iOS'ta durum [PushizoDeliveryStatus.UNSUPPORTED], diğerleri etkisiz false. */
+    fun deliveryStatus(): PushizoDeliveryStatus
+    fun shouldShowDeliveryGuidance(minIntervalDays: Int): Boolean
+    fun openDeliverySettings(context: PushizoContext, setting: PushizoDeliverySetting): Boolean
+    fun showDeliveryGuidance(host: PushizoPermissionHost, setting: PushizoDeliverySetting, message: String?, onResult: ((Boolean) -> Unit)?)
+
     suspend fun inboxList(limit: Int, cursor: String?): PushizoInboxPage
     suspend fun inboxMarkRead(id: String): PushizoInboxItem
     suspend fun inboxMarkAllRead(): Int

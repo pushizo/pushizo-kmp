@@ -144,3 +144,77 @@ data class PushizoPreferencesResult(
 /** `User.setPreferences` girdisi; [channel] null ise tüm kanallar. */
 data class PushizoPreferenceInput(val category: String, val channel: String? = null, val optedIn: Boolean)
 
+/** Bildirim teslim riski (yerel Android `HsDeliveryRisk` ile aynı adlar). */
+enum class PushizoDeliveryRisk {
+    /** Bilinen bir engel yok. */
+    NONE,
+
+    /** Bildirimler gecikebilir (saldırgan pil yönetimli üretici ve pil muafiyeti yok, seyrek kullanım kovası, veri tasarrufu). */
+    ELEVATED,
+
+    /** Bildirimler büyük olasılıkla gelmiyor (bildirim izni ya da kanalı kapalı, arka plan etkinliği kısıtlı). */
+    HIGH,
+}
+
+/** `Pushizo.Delivery.openSettings` ve `showGuidance` ile açılabilen Android ayar ekranı (yerel `HsDeliverySetting` ile aynı adlar). */
+enum class PushizoDeliverySetting {
+    /** Duruma en uygun ekran ([PushizoDeliveryStatus.recommendedSettings] ilk öğesi; öneri yoksa pil optimizasyonu). */
+    AUTO,
+
+    /** Uygulamanın bildirim ayarları. */
+    NOTIFICATIONS,
+
+    /** Üreticinin otomatik başlatma / arka planda çalışma yöneticisi (yoksa uygulama ayrıntıları). */
+    AUTO_START,
+
+    /** Pil optimizasyonu: üreticinin pil yöneticisi, yoksa sistemin pil optimizasyonu listesi. */
+    BATTERY_OPTIMIZATION,
+
+    /** Uygulama ayrıntıları (arka plan kısıtı buradan kaldırılır). */
+    APP_DETAILS,
+}
+
+/**
+ * Cihazın bildirim teslim durumu (`Pushizo.Delivery.status()`; yerel Android `HsDeliveryStatus`). Kişisel veri içermez:
+ * üretici, ROM ve kısıt bayrakları. Yalnızca Android'de doludur; iOS'ta ve Android'de SDK başlatılmadan önce [supported]
+ * false, [risk] [PushizoDeliveryRisk.NONE] ve [recommendedSettings] boştur ([UNSUPPORTED]).
+ */
+data class PushizoDeliveryStatus(
+    /** Teşhis bu platformda okunabildi mi. */
+    val supported: Boolean,
+    /** `Build.MANUFACTURER` (küçük harf). */
+    val manufacturer: String = "",
+    /** `Build.BRAND` (küçük harf). */
+    val brand: String = "",
+    /** Üretici ailesi: `xiaomi`, `huawei`, `honor`, `oppo`, `realme`, `oneplus`, `vivo`, `samsung`, `meizu`, `asus`, `transsion`, `other`. */
+    val vendor: String = "other",
+    /** Üreticinin kendi pil/otomatik başlatma yöneticisi arka plandaki uygulamaları durdurabiliyor mu. */
+    val aggressiveVendor: Boolean = false,
+    /** ROM kimliği: `miui`, `hyperos`, `emui`, `harmonyos`, `magicos`, `coloros`, `oxygenos`, `realmeui`, `funtouchos`, `originos`, `oneui`, `flyme`, `android`. */
+    val rom: String = "",
+    val romVersion: String? = null,
+    /** Bildirim izni verilmiş ve bildirimler açık mı. */
+    val notificationsEnabled: Boolean = true,
+    /** Varsayılan bildirim kanalı kullanıcı tarafından kapatılmış mı. */
+    val channelBlocked: Boolean = false,
+    /** Uygulama pil optimizasyonundan muaf mı. */
+    val batteryOptimizationExempt: Boolean = true,
+    /** Kullanıcı arka plan etkinliğini kısıtlamış mı. */
+    val backgroundRestricted: Boolean = false,
+    /** Bekleme kovası: `exempted`, `active`, `working_set`, `frequent`, `rare`, `restricted` (okunamadıysa null). */
+    val standbyBucket: String? = null,
+    /** Pil tasarrufu kipi açık mı. */
+    val powerSaveMode: Boolean = false,
+    /** Veri tasarrufu uygulamanın arka plan verisini engelliyor mu. */
+    val dataSaverEnabled: Boolean = false,
+    /** Sistem arka plan kısıtı: kullanıcı kısıtlamış ya da uygulama `rare`/`restricted` kovasında. */
+    val restricted: Boolean = false,
+    val risk: PushizoDeliveryRisk = PushizoDeliveryRisk.NONE,
+    /** Kullanıcının açması önerilen ayar ekranları (önem sırasıyla; öneri yoksa boş). */
+    val recommendedSettings: List<PushizoDeliverySetting> = emptyList(),
+) {
+    companion object {
+        /** Teşhisin desteklenmediği platformların durumu (risk yok). */
+        val UNSUPPORTED = PushizoDeliveryStatus(supported = false)
+    }
+}

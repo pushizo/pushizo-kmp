@@ -121,6 +121,44 @@ object Pushizo {
         fun setGeofencingEnabled(enabled: Boolean) = platform.setGeofencingEnabled(enabled)
     }
 
+    /**
+     * Android teslimat güçlendirme: bazı üreticilerin pil/otomatik başlatma yöneticisi arka plandaki uygulamayı durdurduğu
+     * için bildirimler gecikir ya da gelmez. Bu API cihazdaki kısıtları okur ve kullanıcıyı ilgili ayar ekranına götürür.
+     * Yalnızca Android'de etkilidir; iOS'ta [status] [PushizoDeliveryStatus.UNSUPPORTED] döner, [openSettings] ile
+     * [showGuidance] hiçbir şey yapmadan false döner. Çağrılar istisna atmaz.
+     */
+    object Delivery {
+        /** Hazır diyaloğun yeniden önerilme aralığı (gün; yerel SDK varsayılanıyla aynı). */
+        const val DEFAULT_GUIDANCE_INTERVAL_DAYS = 14
+
+        /** Cihazın teslim durumu: üretici, ROM, pil muafiyeti, arka plan kısıtı, risk ve önerilen ayar ekranları. */
+        fun status(): PushizoDeliveryStatus = platform.deliveryStatus()
+
+        /** Hazır açıklama diyaloğu şimdi gösterilmeli mi: teslim riski var ve diyalog son [minIntervalDays] günde gösterilmedi. */
+        fun shouldShowGuidance(minIntervalDays: Int = DEFAULT_GUIDANCE_INTERVAL_DAYS): Boolean =
+            platform.shouldShowDeliveryGuidance(minIntervalDays)
+
+        /**
+         * Ayar ekranını açar. [PushizoDeliverySetting.AUTO] duruma en uygun ekranı seçer; üreticiye özgü ekran bulunamazsa
+         * standart Android ekranına düşülür. Bir ekran açıldıysa true. [context] Android'de Activity ise ekran aynı
+         * görevde açılır.
+         */
+        fun openSettings(context: PushizoContext, setting: PushizoDeliverySetting = PushizoDeliverySetting.AUTO): Boolean =
+            platform.openDeliverySettings(context, setting)
+
+        /**
+         * Hazır açıklama diyaloğunu gösterir (22 dil; [message] verilirse SDK metni yerine o gösterilir). Kullanıcı kabul
+         * ederse [setting] ekranı açılır. [onResult]: ayar ekranı açıldıysa true; kullanıcı vazgeçtiyse ya da ekran
+         * açılamadıysa false. SDK diyaloğu kendiliğinden göstermez; uygun anı uygulama seçer ([shouldShowGuidance]).
+         */
+        fun showGuidance(
+            host: PushizoPermissionHost,
+            setting: PushizoDeliverySetting = PushizoDeliverySetting.AUTO,
+            message: String? = null,
+            onResult: ((Boolean) -> Unit)? = null,
+        ) = platform.showDeliveryGuidance(host, setting, message?.takeIf { it.isNotBlank() }, onResult)
+    }
+
     /** Bildirim kutusu (`add_to_inbox` mesajları). Kullanıcı ve abonelik yoksa çağrılar hata fırlatır. */
     object Inbox {
         /** Öğeler (yeniden eskiye), okunmamış sayısı ve sonraki sayfa imleci; [limit] 1–200. */

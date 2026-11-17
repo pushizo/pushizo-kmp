@@ -70,6 +70,16 @@ private class RecordingPlatform : PushizoPlatform {
     override val geofencingEnabled: Boolean get() = geofencing
     override fun setGeofencingEnabled(enabled: Boolean) { rec("geofencing $enabled"); geofencing = enabled }
 
+    var delivery = PushizoDeliveryStatus.UNSUPPORTED
+    var deliveryResult = false
+    override fun deliveryStatus(): PushizoDeliveryStatus { rec("deliveryStatus"); return delivery }
+    override fun shouldShowDeliveryGuidance(minIntervalDays: Int): Boolean { rec("deliveryShould $minIntervalDays"); return deliveryResult }
+    override fun openDeliverySettings(context: PushizoContext, setting: PushizoDeliverySetting): Boolean { rec("deliveryOpen $setting"); return deliveryResult }
+    override fun showDeliveryGuidance(host: PushizoPermissionHost, setting: PushizoDeliverySetting, message: String?, onResult: ((Boolean) -> Unit)?) {
+        rec("deliveryGuidance $setting $message")
+        onResult?.invoke(deliveryResult)
+    }
+
     val inboxItem = PushizoInboxItem("inb_1", "msg_1", "Başlık", "Gövde", null, null, emptyMap(), read = false, readAt = null, archivedAt = null, expiresAt = null, createdAt = 1L)
     override suspend fun inboxList(limit: Int, cursor: String?): PushizoInboxPage { rec("inboxList $limit $cursor"); return PushizoInboxPage(listOf(inboxItem), 1, "c2", true) }
     override suspend fun inboxMarkRead(id: String): PushizoInboxItem { rec("inboxMarkRead $id"); return inboxItem.copy(read = true, readAt = 2L) }
@@ -232,6 +242,44 @@ class PushizoTest {
         Pushizo.Location.setGeofencingEnabled(true)
         assertTrue(Pushizo.Location.isGeofencingEnabled)
         assertEquals(listOf("geofencing true"), fake.calls)
+    }
+
+    @Test
+    fun teslimDurumuPlatformdanGelirVeVarsayilanDesteklenmiyorRiskYok() {
+        val unsupported = Pushizo.Delivery.status()
+        assertFalse(unsupported.supported)
+        assertEquals(PushizoDeliveryRisk.NONE, unsupported.risk)
+        assertFalse(unsupported.restricted)
+        assertTrue(unsupported.recommendedSettings.isEmpty())
+        assertEquals("other", unsupported.vendor)
+        assertEquals(PushizoDeliveryStatus(supported = false), PushizoDeliveryStatus.UNSUPPORTED)
+
+        fake.delivery = PushizoDeliveryStatus(
+            supported = true, manufacturer = "xiaomi", brand = "redmi", vendor = "xiaomi", aggressiveVendor = true, rom = "hyperos",
+            romVersion = "1.0.2.0", batteryOptimizationExempt = false, standbyBucket = "rare", restricted = true,
+            risk = PushizoDeliveryRisk.ELEVATED,
+            recommendedSettings = listOf(PushizoDeliverySetting.AUTO_START, PushizoDeliverySetting.BATTERY_OPTIMIZATION),
+        )
+        val status = Pushizo.Delivery.status()
+        assertTrue(status.supported)
+        assertEquals(PushizoDeliveryRisk.ELEVATED, status.risk)
+        assertEquals(listOf(PushizoDeliverySetting.AUTO_START, PushizoDeliverySetting.BATTERY_OPTIMIZATION), status.recommendedSettings)
+        assertEquals(listOf("deliveryStatus", "deliveryStatus"), fake.calls)
+    }
+
+    @Test
+    fun teslimYonlendirmeCagrilariVarsayilanlarlaPlatformaGider() {
+        assertEquals(14, Pushizo.Delivery.DEFAULT_GUIDANCE_INTERVAL_DAYS)
+        assertFalse(Pushizo.Delivery.shouldShowGuidance())
+        fake.deliveryResult = true
+        assertTrue(Pushizo.Delivery.shouldShowGuidance(minIntervalDays = 30))
+        assertEquals(listOf("deliveryShould 14", "deliveryShould 30"), fake.calls)
+    }
+
+    @Test
+    fun teslimAyarAdlariYerelSdkIleAynidir() {
+        assertEquals(listOf("AUTO", "NOTIFICATIONS", "AUTO_START", "BATTERY_OPTIMIZATION", "APP_DETAILS"), PushizoDeliverySetting.entries.map { it.name })
+        assertEquals(listOf("NONE", "ELEVATED", "HIGH"), PushizoDeliveryRisk.entries.map { it.name })
     }
 
     @Test

@@ -75,4 +75,17 @@ class IosPlatformTest {
         assertNull(IosPushizoPlatform.featureFlagValue("yok"))
         assertFalse(IosPushizoPlatform.subscriptionState.optedIn)
     }
+
+    @Test
+    fun androidTeslimatGuclendirmeIosTaZararsizdir() {
+        val status = IosPushizoPlatform.deliveryStatus()
+        assertFalse(status.supported)
+        assertEquals(PushizoDeliveryRisk.NONE, status.risk)
+        assertTrue(status.recommendedSettings.isEmpty())
+        assertFalse(IosPushizoPlatform.shouldShowDeliveryGuidance(14))
+        assertFalse(IosPushizoPlatform.openDeliverySettings(PushizoApplicationContext, PushizoDeliverySetting.AUTO_START))
+        var result: Boolean? = null
+        IosPushizoPlatform.showDeliveryGuidance(platform.UIKit.UIViewController(), PushizoDeliverySetting.AUTO, null) { result = it }
+        assertEquals(false, result)
+    }
 }

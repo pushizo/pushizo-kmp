@@ -7,6 +7,9 @@ import com.pushizo.sdk.HsConsent
 import com.pushizo.sdk.HsForegroundEvent
 import com.pushizo.sdk.HsContentCard
 import com.pushizo.sdk.HsContentCardFeed
+import com.pushizo.sdk.HsDeliveryRisk
+import com.pushizo.sdk.HsDeliverySetting
+import com.pushizo.sdk.HsDeliveryStatus
 import com.pushizo.sdk.HsInboxItem
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
@@ -82,6 +85,35 @@ internal fun HsPreferencesResult.toCommon() =
     PushizoPreferencesResult(preferences.map { it.toCommon() }, categories.map { it.toCommon() }, consents.map { it.toCommon() })
 
 internal fun PushizoPreferenceInput.toNative() = HsPreferenceInput(category, channel, optedIn)
+
+/** Risk ve ayar ekranı adları yerel enum'larla aynıdır; yerel SDK'nın ileride ekleyeceği, bu sürümün tanımadığı ad atlanır. */
+internal fun HsDeliveryRisk.toCommon(): PushizoDeliveryRisk =
+    PushizoDeliveryRisk.entries.firstOrNull { it.name == name } ?: PushizoDeliveryRisk.NONE
+
+internal fun HsDeliverySetting.toCommon(): PushizoDeliverySetting? = PushizoDeliverySetting.entries.firstOrNull { it.name == name }
+
+internal fun PushizoDeliverySetting.toNative(): HsDeliverySetting =
+    HsDeliverySetting.entries.firstOrNull { it.name == name } ?: HsDeliverySetting.AUTO
+
+internal fun HsDeliveryStatus.toCommon() = PushizoDeliveryStatus(
+    supported = true,
+    manufacturer = manufacturer,
+    brand = brand,
+    vendor = vendor.id,
+    aggressiveVendor = vendor.aggressive,
+    rom = rom,
+    romVersion = romVersion,
+    notificationsEnabled = notificationsEnabled,
+    channelBlocked = channelBlocked,
+    batteryOptimizationExempt = batteryOptimizationExempt,
+    backgroundRestricted = backgroundRestricted,
+    standbyBucket = standbyBucket?.id,
+    powerSaveMode = powerSaveMode,
+    dataSaverEnabled = dataSaverEnabled,
+    restricted = restricted,
+    risk = risk.toCommon(),
+    recommendedSettings = recommendedSettings.mapNotNull { it.toCommon() },
+)
 
 /** Bayrak değerindeki `org.json` türleri ortak koleksiyonlara çevrilir; `JSONObject.NULL` null olur. */
 internal fun Any?.toCommonJson(): Any? = when (this) {
@@ -182,6 +214,15 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override fun onLocationPermissionResult() = Native.Location.onPermissionResult()
     override val geofencingEnabled: Boolean get() = Native.Location.isGeofencingEnabled
     override fun setGeofencingEnabled(enabled: Boolean) = Native.Location.setGeofencingEnabled(enabled)
+
+    // Android teslimat güçlendirme (ADR-0092): teşhis, ayar ekranı adayları ve diyalog yerel SDK'dadır.
+    override fun deliveryStatus(): PushizoDeliveryStatus = Native.Delivery.status()?.toCommon() ?: PushizoDeliveryStatus.UNSUPPORTED
+    override fun shouldShowDeliveryGuidance(minIntervalDays: Int): Boolean = Native.Delivery.shouldShowGuidance(minIntervalDays)
+    override fun openDeliverySettings(context: PushizoContext, setting: PushizoDeliverySetting): Boolean =
+        Native.Delivery.openSettings(context, setting.toNative())
+
+    override fun showDeliveryGuidance(host: PushizoPermissionHost, setting: PushizoDeliverySetting, message: String?, onResult: ((Boolean) -> Unit)?) =
+        Native.Delivery.showGuidance(host, setting.toNative(), message, onResult)
 
     override suspend fun inboxList(limit: Int, cursor: String?): PushizoInboxPage = Native.Inbox.list(limit, cursor).toCommon()
     override suspend fun inboxMarkRead(id: String): PushizoInboxItem = Native.Inbox.markRead(id).toCommon()

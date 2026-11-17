@@ -339,6 +339,14 @@ internal object IosPushizoPlatform : PushizoPlatform {
     override val geofencingEnabled: Boolean get() = PZLocation.isGeofencingEnabled()
     override fun setGeofencingEnabled(enabled: Boolean) = PZLocation.setGeofencingEnabled(enabled)
 
+    // Android teslimat güçlendirme (ADR-0092) iOS'ta yoktur: durum "desteklenmiyor / risk yok", diğerleri etkisiz false.
+    override fun deliveryStatus(): PushizoDeliveryStatus = PushizoDeliveryStatus.UNSUPPORTED
+    override fun shouldShowDeliveryGuidance(minIntervalDays: Int): Boolean = false
+    override fun openDeliverySettings(context: PushizoContext, setting: PushizoDeliverySetting): Boolean = false
+    override fun showDeliveryGuidance(host: PushizoPermissionHost, setting: PushizoDeliverySetting, message: String?, onResult: ((Boolean) -> Unit)?) {
+        onResult?.invoke(false)
+    }
+
     override suspend fun inboxList(limit: Int, cursor: String?): PushizoInboxPage =
         awaitResult<PZInboxPage> { done -> PZInbox.listWithLimit(limit.toLong(), cursor, done) }.toCommon()
 

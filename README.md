@@ -122,6 +122,19 @@ if (Pushizo.FeatureFlags.refresh() && Pushizo.FeatureFlags.isEnabled("yeni_sepet
 Pushizo.Location.setGeofencingEnabled(true) // yalnızca konum paylaşımı ve arka plan izni varsa izler
 ```
 
+Android teslimat güçlendirme (`Pushizo.Delivery`) da ortak API'dedir: cihazdaki pil ve arka plan kısıtlarını okur, kullanıcıyı
+ilgili ayar ekranına götürür ([rehber](https://docs.pushizo.com/docs/channels/android-delivery)). Yalnızca Android'de etkilidir;
+iOS'ta `status()` `PushizoDeliveryStatus.UNSUPPORTED` (`risk` `NONE`) döner, `openSettings` `false` döner ve `showGuidance`
+hiçbir şey göstermeden `onResult(false)` çağırır:
+
+```kotlin
+val status = Pushizo.Delivery.status()            // supported, vendor, rom, risk, restricted, recommendedSettings
+if (Pushizo.Delivery.shouldShowGuidance()) {      // risk var ve diyalog son 14 günde gösterilmedi
+    Pushizo.Delivery.showGuidance(activity) { opened -> /* ayar ekranı açıldı mı */ }
+}
+Pushizo.Delivery.openSettings(context, PushizoDeliverySetting.AUTO_START) // kendi arayüzünüzden
+```
+
 Canlı sohbet, gömülü yerleşimler ve özel in-app çizici ortak API'de yok. Android'de `api` bağımlılığı sayesinde `androidMain` içinden `com.pushizo.sdk.Pushizo` ile doğrudan çağrılır.
 
 ## Geliştirme

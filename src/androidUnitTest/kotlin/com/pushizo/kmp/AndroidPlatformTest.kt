@@ -2,6 +2,11 @@ package com.pushizo.kmp
 
 import com.pushizo.sdk.HsAction
 import com.pushizo.sdk.HsClickEvent
+import com.pushizo.sdk.HsDeliveryRisk
+import com.pushizo.sdk.HsDeliverySetting
+import com.pushizo.sdk.HsDeliveryStatus
+import com.pushizo.sdk.HsDeviceVendor
+import com.pushizo.sdk.HsStandbyBucket
 import com.pushizo.sdk.HsLog
 import com.pushizo.sdk.HsNotification
 import com.pushizo.sdk.HsPushSubscriptionState
@@ -73,6 +78,64 @@ class AndroidPlatformTest {
         assertEquals("+905551112233", native.sms)
         assertEquals(mapOf("p" to "1"), native.tags)
         assertEquals(mapOf("crm" to "c1"), native.aliases)
+    }
+
+    @Test
+    fun `teslim durumu ortak modele eksiksiz çevrilir`() {
+        val native = HsDeliveryStatus(
+            manufacturer = "xiaomi",
+            brand = "redmi",
+            vendor = HsDeviceVendor.XIAOMI,
+            rom = "hyperos",
+            romVersion = "1.0.2.0",
+            notificationsEnabled = true,
+            channelBlocked = false,
+            batteryOptimizationExempt = false,
+            backgroundRestricted = false,
+            standbyBucket = HsStandbyBucket.RARE,
+            powerSaveMode = true,
+            dataSaverEnabled = false,
+        )
+        val status = native.toCommon()
+        assertTrue(status.supported)
+        assertEquals(listOf("xiaomi", "redmi", "xiaomi", "hyperos", "1.0.2.0"), listOf(status.manufacturer, status.brand, status.vendor, status.rom, status.romVersion))
+        assertTrue(status.aggressiveVendor)
+        assertTrue(status.notificationsEnabled)
+        assertFalse(status.channelBlocked)
+        assertFalse(status.batteryOptimizationExempt)
+        assertFalse(status.backgroundRestricted)
+        assertEquals("rare", status.standbyBucket)
+        assertTrue(status.powerSaveMode)
+        assertFalse(status.dataSaverEnabled)
+        // Türetilen alanlar yerel kurallardan gelir (kopyalanmaz): kova `rare` → kısıtlı, saldırgan üretici + muafiyet yok → ELEVATED.
+        assertEquals(native.restricted, status.restricted)
+        assertTrue(status.restricted)
+        assertEquals(PushizoDeliveryRisk.ELEVATED, status.risk)
+        assertEquals(native.recommendedSettings.map { it.name }, status.recommendedSettings.map { it.name })
+        assertEquals(listOf(PushizoDeliverySetting.AUTO_START, PushizoDeliverySetting.BATTERY_OPTIMIZATION), status.recommendedSettings)
+
+        val clean = native.copy(vendor = HsDeviceVendor.OTHER, standbyBucket = null, batteryOptimizationExempt = true).toCommon()
+        assertEquals(PushizoDeliveryRisk.NONE, clean.risk)
+        assertFalse(clean.restricted)
+        assertEquals(null, clean.standbyBucket)
+        assertTrue(clean.recommendedSettings.isEmpty())
+        assertEquals(PushizoDeliveryRisk.HIGH, native.copy(notificationsEnabled = false).toCommon().risk)
+    }
+
+    @Test
+    fun `teslim riski ve ayar ekranı adları yerel enum'larla bire bir eşlenir`() {
+        assertEquals(HsDeliveryRisk.entries.map { it.name }, PushizoDeliveryRisk.entries.map { it.name })
+        assertEquals(HsDeliverySetting.entries.map { it.name }, PushizoDeliverySetting.entries.map { it.name })
+        HsDeliveryRisk.entries.forEach { assertEquals(it.name, it.toCommon().name) }
+        HsDeliverySetting.entries.forEach { assertEquals(it.name, it.toCommon()?.name) }
+        PushizoDeliverySetting.entries.forEach { assertEquals(it.name, it.toNative().name) }
+    }
+
+    @Test
+    fun `yerel SDK başlatılmadan teslim durumu desteklenmiyor ve çağrılar false döner`() {
+        assertFalse(Native.isInitialized)
+        assertSame(PushizoDeliveryStatus.UNSUPPORTED, AndroidPushizoPlatform.deliveryStatus())
+        assertFalse(AndroidPushizoPlatform.shouldShowDeliveryGuidance(14))
     }
 
     @Test
