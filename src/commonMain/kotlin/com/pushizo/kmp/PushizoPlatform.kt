@@ -31,6 +31,8 @@ internal interface PushizoPlatform {
     val smsNumbers: List<String>
     val externalId: String?
     val userId: String?
+    /** Fire OS ADM kayıt kimliği (yalnızca Android; iOS'ta etkisiz). */
+    fun registerAdm(token: String)
 
     val subscriptionState: PushizoSubscriptionState
     fun optIn()
@@ -44,6 +46,16 @@ internal interface PushizoPlatform {
     fun addClickListener(listener: (PushizoClickEvent) -> Unit): PushizoListenerRegistration
     fun addForegroundLifecycleListener(listener: (PushizoForegroundEvent) -> Unit): PushizoListenerRegistration
     fun clearAllNotifications()
+    /** Android tepsi kimliğiyle kaldırır; iOS'ta etkisiz. */
+    fun removeNotification(androidNotificationId: Int)
+    /** iOS istek kimliğiyle kaldırır; Android'de sayısal kimlikse tepsi kimliği sayılır, değilse etkisiz. */
+    fun removeNotification(identifier: String)
+    fun removeGroupedNotifications(group: String)
+    /** Uygulama rozeti (yalnızca iOS; Android'de etkisiz). */
+    fun setBadgeCount(count: Int)
+
+    /** Mobil reklam kimliği (ADR-0037). */
+    fun setAdvertisingId(id: String?)
 
     fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?)
 
@@ -53,6 +65,13 @@ internal interface PushizoPlatform {
     fun getTriggers(): Map<String, String>
     fun setScreen(name: String?)
     var inAppPaused: Boolean
+    fun addInAppClickListener(listener: (PushizoInAppClickEvent) -> Unit): PushizoListenerRegistration
+    fun addInAppLifecycleListener(listener: PushizoInAppLifecycleListener): PushizoListenerRegistration
+
+    suspend fun placementsList(key: String, limit: Int): List<PushizoInAppMessage>
+    fun placementReportImpression(message: PushizoInAppMessage)
+    fun placementReportClick(message: PushizoInAppMessage, buttonId: String)
+    fun placementReportDismiss(message: PushizoInAppMessage)
 
     val locationShared: Boolean
     val locationPermissionGranted: Boolean
@@ -61,6 +80,9 @@ internal interface PushizoPlatform {
     fun onLocationPermissionResult()
     val geofencingEnabled: Boolean
     fun setGeofencingEnabled(enabled: Boolean)
+    val locationBackgroundPermissionGranted: Boolean
+    /** Arka plan konum izni: Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman" izni ([rationale] iOS'ta yok sayılır). */
+    fun requestBackgroundLocationPermission(host: PushizoPermissionHost, rationale: String?)
 
     /** Android teslimat güçlendirme (ADR-0092). iOS'ta durum [PushizoDeliveryStatus.UNSUPPORTED], diğerleri etkisiz false. */
     fun deliveryStatus(): PushizoDeliveryStatus
@@ -81,6 +103,29 @@ internal interface PushizoPlatform {
 
     suspend fun getPreferences(): PushizoPreferencesResult
     suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult
+
+    /** Canlı sohbet bu platformda bağlı mı (Android true; iOS'ta Objective-C cephesinde sohbet olmadığından false). */
+    val chatSupported: Boolean
+    val chatVisitorId: String?
+    val chatUnreadCount: Int
+    val chatIsListening: Boolean
+    fun addChatListener(listener: PushizoChatListener): PushizoListenerRegistration
+    fun addChatOpenListener(listener: (PushizoChatPushInfo) -> Unit): PushizoListenerRegistration
+    suspend fun chatStart(name: String?, email: String?, language: String?): PushizoChatIdentifyResult
+    suspend fun chatIdentify(name: String?, email: String?, language: String?): PushizoChatIdentifyResult
+    suspend fun chatGetConfig(language: String?): PushizoChatConfig
+    suspend fun chatGetConversation(): PushizoChatConversationState
+    suspend fun chatGetMessages(afterSeq: Long?, beforeSeq: Long?, limit: Int): PushizoChatMessagePage
+    suspend fun chatSendMessage(text: String, optionId: String?): PushizoChatMessage
+    suspend fun chatSendAttachment(bytes: ByteArray, fileName: String, mimeType: String, text: String?): PushizoChatMessage
+    suspend fun chatMarkRead(seq: Long): Int
+    suspend fun chatRefreshUnreadCount(): Int
+    suspend fun chatLeaveOfflineMessage(email: String, text: String, name: String?): PushizoChatMessage
+    fun chatSetTyping(typing: Boolean)
+    fun chatStartListening()
+    fun chatStopListening()
+    /** Ek adresi; sohbetin bağlı olmadığı platformda null. */
+    fun chatAttachmentUrl(attachmentId: String, download: Boolean): String?
 
     suspend fun refreshFeatureFlags(): Boolean
     fun isFeatureEnabled(key: String, default: Boolean): Boolean

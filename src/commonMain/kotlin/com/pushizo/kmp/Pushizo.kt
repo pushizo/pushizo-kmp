@@ -56,6 +56,31 @@ object Pushizo {
         val externalId: String? get() = platform.externalId
         val id: String? get() = platform.userId
 
+        /**
+         * Fire OS ADM kayıt kimliği (yalnızca Android; ana FCM aboneliğinin yerine geçmez). Geçersiz kimlikte
+         * `IllegalArgumentException`. iOS'ta etkisizdir.
+         */
+        fun registerAdm(token: String) = platform.registerAdm(token)
+
+        /** Kategori × kanal tercihleri ([Preferences.get] ile aynı). Abonelik yoksa `IllegalStateException`. */
+        suspend fun getPreferences(): PushizoPreferencesResult = platform.getPreferences()
+
+        /** Tercihleri yazar ([Preferences.set] ile aynı). */
+        suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult = platform.setPreferences(preferences)
+
+        /**
+         * Reklam kişiselleştirme rızası (ADR-0037): kullanıcının e-posta/telefon özetinin reklam platformu kitlelerine
+         * gönderilmesine izin. `false` rızayı geri alır. Tercih ucundaki ayrılmış `ads_personalization` anahtarına yazılır.
+         */
+        suspend fun setAdsPersonalizationConsent(granted: Boolean): PushizoPreferencesResult =
+            platform.setPreferences(listOf(PushizoPreferenceInput(ADS_PERSONALIZATION, null, granted)))
+
+        /** Rıza kayıtları (`ads_personalization` …). Abonelik yoksa `IllegalStateException`. */
+        suspend fun getConsents(): List<PushizoConsent> = platform.getPreferences().consents
+
+        /** Reklam kişiselleştirme rızasının tercih ucundaki ayrılmış kategori anahtarı. */
+        const val ADS_PERSONALIZATION = "ads_personalization"
+
         @Suppress("ClassName")
         object pushSubscription {
             val state: PushizoSubscriptionState get() = platform.subscriptionState
@@ -83,6 +108,30 @@ object Pushizo {
         fun addForegroundLifecycleListener(listener: (PushizoForegroundEvent) -> Unit): PushizoListenerRegistration =
             platform.addForegroundLifecycleListener(listener)
         fun clearAll() = platform.clearAllNotifications()
+
+        /** Tek bildirimi Android tepsi kimliğiyle ([PushizoNotification.androidNotificationId]) kaldırır; iOS'ta etkisizdir. */
+        fun removeNotification(androidNotificationId: Int) = platform.removeNotification(androidNotificationId)
+
+        /**
+         * Tek bildirimi iOS istek kimliğiyle (`UNNotificationRequest.identifier`) kaldırır. Android'de değer sayıysa tepsi
+         * kimliği sayılır, değilse etkisizdir.
+         */
+        fun removeNotification(identifier: String) = platform.removeNotification(identifier)
+
+        /** Aynı gruptaki (Android `android_group`, iOS `thread-id`) tüm bildirimleri kaldırır. */
+        fun removeGroupedNotifications(group: String) = platform.removeGroupedNotifications(group)
+
+        /**
+         * Uygulama rozetini ayarlar (iOS; NSE ile paylaşılan sayaç da eşitlenir). Android'de rozet görünen bildirimlerden
+         * hesaplandığı için etkisizdir. Negatif değerde `IllegalArgumentException`.
+         */
+        fun setBadgeCount(count: Int) {
+            require(count >= 0) { "count negatif olamaz." }
+            platform.setBadgeCount(count)
+        }
+
+        /** Rozeti sıfırlar (iOS); Android'de etkisizdir. */
+        fun clearBadge() = platform.setBadgeCount(0)
     }
 
     object Session {
@@ -101,6 +150,50 @@ object Pushizo {
         var paused: Boolean
             get() = platform.inAppPaused
             set(value) { platform.inAppPaused = value }
+
+        /** In-app mesaj düğmesi/bağlantısı tıklamaları. `initialize` sonrasında eklenmelidir. */
+        fun addClickListener(listener: (PushizoInAppClickEvent) -> Unit): PushizoListenerRegistration =
+            platform.addInAppClickListener(listener)
+
+        /**
+         * In-app yaşam döngüsü (willDisplay/didDisplay/willDismiss/didDismiss). Android'de `initialize` sonrasında
+         * eklenmelidir. iOS'ta Objective-C cephesinde karşılığı olmadığından dinleyici kaydolur ama tetiklenmez.
+         */
+        fun addLifecycleListener(listener: PushizoInAppLifecycleListener): PushizoListenerRegistration =
+            platform.addInAppLifecycleListener(listener)
+    }
+
+    /**
+     * Gömülü yerleşimler (ADR-0068): uygulamanın ayırdığı alana içerik. Model döner, çizim uygulamanındır; içerik ekrana
+     * gelince [reportImpression] çağrılır. Abonelik yoksa veya onay bekleniyorsa liste boştur.
+     */
+    object Placements {
+        private val KEY = Regex("^[a-z][a-z0-9_.-]{0,63}$")
+
+        /** Alanın içeriği. Anahtar `^[a-z][a-z0-9_.-]{0,63}$`, [limit] 1–10; aksi hâlde `IllegalArgumentException`. */
+        suspend fun list(key: String, limit: Int = 1): List<PushizoInAppMessage> {
+            require(KEY.matches(key)) { "Geçersiz yerleşim anahtarı." }
+            require(limit in 1..10) { "limit 1-10 olmalı." }
+            return platform.placementsList(key, limit)
+        }
+
+        fun reportImpression(message: PushizoInAppMessage) = platform.placementReportImpression(message)
+
+        fun reportClick(message: PushizoInAppMessage, buttonId: String) {
+            require(buttonId.isNotBlank()) { "buttonId boş olamaz." }
+            platform.placementReportClick(message, buttonId)
+        }
+
+        fun reportDismiss(message: PushizoInAppMessage) = platform.placementReportDismiss(message)
+    }
+
+    /**
+     * Mobil reklam kimliği (GAID/IDFA; ADR-0037). SDK reklam kitaplığı içermez: kimliği uygulama alıp verir. Kimlik yalnızca
+     * `ads_personalization` rızası olan kullanıcıda ve SHA-256 özetiyle reklam kitlesine gider; `null` sunucudaki kaydı siler.
+     * iOS'ta Objective-C cephesinde karşılığı olmadığından şimdilik etkisizdir (uyarı loglanır).
+     */
+    object Ads {
+        fun setAdvertisingId(id: String?) = platform.setAdvertisingId(id)
     }
 
     object Location {
@@ -119,6 +212,20 @@ object Pushizo {
          */
         val isGeofencingEnabled: Boolean get() = platform.geofencingEnabled
         fun setGeofencingEnabled(enabled: Boolean) = platform.setGeofencingEnabled(enabled)
+
+        /** Arka plan konum izni verilmiş mi (Android `ACCESS_BACKGROUND_LOCATION`, iOS "her zaman" izni). */
+        val backgroundPermissionGranted: Boolean get() = platform.locationBackgroundPermissionGranted
+
+        /**
+         * Arka plan konum iznini ister. Android: açıklama diyaloğu ([rationale]; null ise SDK metni) ve sistem istemi; sonuç
+         * için Activity `onRequestPermissionsResult` içinden [onPermissionResult] çağrılır. iOS: "her zaman" izni istenir
+         * ([rationale] yok sayılır). Önce ön plan konum izni verilmiş olmalıdır.
+         */
+        fun requestBackgroundPermission(host: PushizoPermissionHost, rationale: String? = null) =
+            platform.requestBackgroundLocationPermission(host, rationale)
+
+        /** [requestBackgroundPermission] ile aynıdır (iOS adlandırması). */
+        fun requestAlwaysPermission(host: PushizoPermissionHost) = platform.requestBackgroundLocationPermission(host, null)
     }
 
     /**
@@ -160,6 +267,65 @@ object Pushizo {
     }
 
     /** Bildirim kutusu (`add_to_inbox` mesajları). Kullanıcı ve abonelik yoksa çağrılar hata fırlatır. */
+    /**
+     * Canlı sohbet (ADR-0040). Android'de yerel `Pushizo.Chat`'e devreder. iOS'ta Objective-C cephesinde sohbet
+     * olmadığından henüz bağlı değildir: [isSupported] false, [visitorId] null, [unreadCount] 0, [isListening] false,
+     * [attachmentUrl] null döner; dinleyiciler kaydolur ama tetiklenmez, [setTyping]/[startListening]/[stopListening]
+     * etkisizdir ve değer döndüren `suspend` çağrılar `UnsupportedOperationException` atar. Çağırmadan önce
+     * [isSupported] denetlenir.
+     */
+    object Chat {
+        /** Sohbet bu platformda bağlı mı (Android true, iOS false). */
+        val isSupported: Boolean get() = platform.chatSupported
+        val visitorId: String? get() = platform.chatVisitorId
+
+        /** Son bilinen okunmamış mesaj sayısı (ağ çağrısı yapmaz). */
+        val unreadCount: Int get() = platform.chatUnreadCount
+
+        /** Canlı akış ([startListening]) açık mı. */
+        val isListening: Boolean get() = platform.chatIsListening
+
+        fun addListener(listener: PushizoChatListener): PushizoListenerRegistration = platform.addChatListener(listener)
+
+        /** Sohbet bildirimine tıklama. */
+        fun addOpenListener(listener: (PushizoChatPushInfo) -> Unit): PushizoListenerRegistration =
+            platform.addChatOpenListener(listener)
+
+        /** Ziyaretçiyi tanıtır ve canlı akışı başlatır. */
+        suspend fun start(name: String? = null, email: String? = null, language: String? = null): PushizoChatIdentifyResult =
+            platform.chatStart(name, email, language)
+
+        /** Ziyaretçiyi tanıtır (akışı başlatmaz). */
+        suspend fun identify(name: String? = null, email: String? = null, language: String? = null): PushizoChatIdentifyResult =
+            platform.chatIdentify(name, email, language)
+
+        suspend fun getConfig(language: String? = null): PushizoChatConfig = platform.chatGetConfig(language)
+        suspend fun getConversation(): PushizoChatConversationState = platform.chatGetConversation()
+
+        suspend fun getMessages(afterSeq: Long? = null, beforeSeq: Long? = null, limit: Int = 50): PushizoChatMessagePage =
+            platform.chatGetMessages(afterSeq, beforeSeq, limit)
+
+        /** Mesaj gönderir; çevrimdışıyken kuyrukta bekler ve `pending` durumlu mesaj döner. */
+        suspend fun sendMessage(text: String, optionId: String? = null): PushizoChatMessage = platform.chatSendMessage(text, optionId)
+
+        suspend fun sendAttachment(bytes: ByteArray, fileName: String, mimeType: String, text: String? = null): PushizoChatMessage =
+            platform.chatSendAttachment(bytes, fileName, mimeType, text)
+
+        /** Verilen sıra numarasına kadar okundu işaretler; kalan okunmamış sayısını döner. */
+        suspend fun markRead(seq: Long): Int = platform.chatMarkRead(seq)
+        suspend fun refreshUnreadCount(): Int = platform.chatRefreshUnreadCount()
+
+        suspend fun leaveOfflineMessage(email: String, text: String, name: String? = null): PushizoChatMessage =
+            platform.chatLeaveOfflineMessage(email, text, name)
+
+        fun setTyping(typing: Boolean) = platform.chatSetTyping(typing)
+        fun startListening() = platform.chatStartListening()
+        fun stopListening() = platform.chatStopListening()
+
+        /** Ek indirme/görüntüleme adresi; sohbetin bağlı olmadığı platformda null. */
+        fun attachmentUrl(attachmentId: String, download: Boolean = false): String? = platform.chatAttachmentUrl(attachmentId, download)
+    }
+
     object Inbox {
         /** Öğeler (yeniden eskiye), okunmamış sayısı ve sonraki sayfa imleci; [limit] 1–200. */
         suspend fun list(limit: Int = 50, cursor: String? = null): PushizoInboxPage = platform.inboxList(limit, cursor)

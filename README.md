@@ -135,7 +135,44 @@ if (Pushizo.Delivery.shouldShowGuidance()) {      // risk var ve diyalog son 14 
 Pushizo.Delivery.openSettings(context, PushizoDeliverySetting.AUTO_START) // kendi arayüzünüzden
 ```
 
-Canlı sohbet, gömülü yerleşimler ve özel in-app çizici ortak API'de yok. Android'de `api` bağımlılığı sayesinde `androidMain` içinden `com.pushizo.sdk.Pushizo` ile doğrudan çağrılır.
+Gömülü yerleşimler (`Pushizo.Placements`), canlı sohbet (`Pushizo.Chat`), in-app tıklama ve yaşam döngüsü dinleyicileri, reklam
+kişiselleştirme rızası (`Pushizo.User.setAdsPersonalizationConsent`, `getConsents`), reklam kimliği (`Pushizo.Ads`), rozet,
+bildirim kaldırma, arka plan konum izni ve ADM kaydı da ortak API'dedir:
+
+```kotlin
+// Gömülü yerleşim: model döner, çizim sizindir
+val message = Pushizo.Placements.list("home_banner").firstOrNull()
+message?.let { Pushizo.Placements.reportImpression(it) }
+
+// In-app tıklama ve yaşam döngüsü
+val clicks = Pushizo.InAppMessages.addClickListener { event -> println(event.actionId) }
+
+// Rıza, reklam kimliği, rozet, bildirim kaldırma, arka plan konum izni
+Pushizo.User.setAdsPersonalizationConsent(true)
+val consents = Pushizo.User.getConsents()
+Pushizo.Ads.setAdvertisingId(advertisingId)
+Pushizo.Notifications.setBadgeCount(3)
+Pushizo.Notifications.removeGroupedNotifications("siparis")
+Pushizo.Location.requestBackgroundPermission(activity)
+
+// Canlı sohbet
+if (Pushizo.Chat.isSupported) {
+    Pushizo.Chat.addListener(object : PushizoChatListener {
+        override fun onMessage(message: PushizoChatMessage) { /* … */ }
+    })
+    Pushizo.Chat.start(name = "Ali")
+    Pushizo.Chat.sendMessage("Merhaba")
+}
+```
+
+Tek platformlu çağrılar diğer platformda zararsızdır: rozet yalnızca iOS'ta, `registerAdm` ve sayısal kimlikle
+`removeNotification` yalnızca Android'de etkilidir; `requestBackgroundPermission` ile `requestAlwaysPermission` aynı izni ister.
+
+iOS'ta henüz bağlı olmayanlar (Objective-C cephesinde karşılığı yok): canlı sohbet, `Ads.setAdvertisingId` ve in-app yaşam
+döngüsü dinleyicisi. Bu çağrılar iOS'ta etkisizdir; `Pushizo.Chat.isSupported` `false` döner ve değer döndüren `suspend` sohbet
+çağrıları `UnsupportedOperationException` atar.
+
+Özel in-app çizici (`setRenderer`), Live Activities ve `Uri` ile sohbet eki ortak API'de yok. Android'de `api` bağımlılığı sayesinde `androidMain` içinden `com.pushizo.sdk.Pushizo` ile doğrudan çağrılır.
 
 ## Geliştirme
 

@@ -10,6 +10,9 @@ import platform.UserNotifications.UNAuthorizationStatusAuthorized
 import platform.UserNotifications.UNAuthorizationStatusDenied
 import platform.UserNotifications.UNAuthorizationStatusNotDetermined
 import platform.UserNotifications.UNAuthorizationStatusProvisional
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -18,6 +21,15 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** iOS köprüsü: Objective-C cephesinden gelen Foundation türlerinin ortak modele çevrilmesi ve gerçek cepheyle çağrılar. */
+internal actual fun testPermissionHost(): PushizoPermissionHost = platform.UIKit.UIViewController()
+
+/** Sahte olmayan platformda askıya alınan çağrıyı eşzamanlı çalıştırır (desteklenmeyen sohbet çağrıları hemen hata verir). */
+private fun <T> runNow(block: suspend () -> T): Result<T> {
+    var result: Result<T>? = null
+    block.startCoroutine(Continuation(EmptyCoroutineContext) { result = it })
+    return checkNotNull(result) { "askıya alınan çağrı eşzamanlı tamamlanmadı" }
+}
+
 class IosPlatformTest {
     @Test
     fun hataAlaniAndroidIleAyniIstisnaTurlerineCevrilir() {
@@ -87,5 +99,49 @@ class IosPlatformTest {
         var result: Boolean? = null
         IosPushizoPlatform.showDeliveryGuidance(platform.UIKit.UIViewController(), PushizoDeliverySetting.AUTO, null) { result = it }
         assertEquals(false, result)
+    }
+
+    @Test
+    fun sohbetIosTaBagliDegilVeZararsizdir() {
+        assertFalse(IosPushizoPlatform.chatSupported)
+        assertNull(IosPushizoPlatform.chatVisitorId)
+        assertEquals(0, IosPushizoPlatform.chatUnreadCount)
+        assertFalse(IosPushizoPlatform.chatIsListening)
+        assertNull(IosPushizoPlatform.chatAttachmentUrl("att_1", download = false))
+        IosPushizoPlatform.chatSetTyping(true)
+        IosPushizoPlatform.chatStartListening()
+        IosPushizoPlatform.chatStopListening()
+        assertFalse(IosPushizoPlatform.chatIsListening)
+        IosPushizoPlatform.addChatListener(object : PushizoChatListener {}).remove()
+        IosPushizoPlatform.addChatOpenListener { }.remove()
+        // Değer döndürmesi gereken çağrılar sahte sonuç üretmez: açık bir "desteklenmiyor" hatası verir.
+        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatStart(null, null, null) }.exceptionOrNull())
+        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatSendMessage("Selam", null) }.exceptionOrNull())
+        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatGetMessages(null, null, 50) }.exceptionOrNull())
+        assertIs<UnsupportedOperationException>(runNow { IosPushizoPlatform.chatMarkRead(1) }.exceptionOrNull())
+    }
+
+    @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+    @Test
+    fun cephedeOlmayanVeAndroideOzguCagrilarEtkisizdir() {
+        IosPushizoPlatform.setAdvertisingId("38400000-8cf0-11bd-b23e-10b96e40000d")
+        IosPushizoPlatform.registerAdm("amzn1.adm-registration.v3.x")
+        IosPushizoPlatform.removeNotification(42)
+        IosPushizoPlatform.addInAppLifecycleListener(object : PushizoInAppLifecycleListener {}).remove()
+        // Elle kurulan (cephe nesnesi olmayan) yerleşim mesajında raporlama yok sayılır.
+        val message = PushizoInAppMessage("iam_1", null, "modal", "blocks", null, null, null, dismissible = true, blocks = emptyList())
+        assertNull(message.nativeIos())
+        IosPushizoPlatform.placementReportImpression(message)
+        IosPushizoPlatform.placementReportClick(message, "btn_1")
+        IosPushizoPlatform.placementReportDismiss(message)
+    }
+
+    @Test
+    fun gercekCepheIleInAppTiklamaDinleyicisiVeArkaPlanIzni() {
+        // Gerçek Objective-C cephesi: dinleyici kaydı/kaldırma ve CoreLocation yetki okuması çökmeden çalışır.
+        val registration = IosPushizoPlatform.addInAppClickListener { }
+        registration.remove()
+        registration.remove()
+        assertFalse(IosPushizoPlatform.locationBackgroundPermissionGranted)
     }
 }

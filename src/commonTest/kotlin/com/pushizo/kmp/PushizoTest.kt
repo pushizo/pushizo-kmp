@@ -11,6 +11,9 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/** İzin istemi çağrıları için platforma özgü boş ana bilgisayar nesnesi (Android `Activity`, iOS `UIViewController`). */
+internal expect fun testPermissionHost(): PushizoPermissionHost
+
 /** Yalnızca çağrıları kaydeder: ortak API'nin doğru yerel işleme, doğru bağımsız değişkenle gittiğini sınar. */
 private class RecordingPlatform : PushizoPlatform {
     val calls = mutableListOf<String>()
@@ -40,6 +43,7 @@ private class RecordingPlatform : PushizoPlatform {
     override val smsNumbers = listOf("+905550000000")
     override val externalId = "user_42"
     override val userId = "usr_1"
+    override fun registerAdm(token: String) = rec("registerAdm $token")
     override val subscriptionState get() = state
     override fun optIn() = rec("optIn")
     override fun optOut() = rec("optOut")
@@ -54,6 +58,11 @@ private class RecordingPlatform : PushizoPlatform {
     override fun addClickListener(listener: (PushizoClickEvent) -> Unit) = PushizoListenerRegistration { rec("click removed") }
     override fun addForegroundLifecycleListener(listener: (PushizoForegroundEvent) -> Unit) = PushizoListenerRegistration { rec("foreground removed") }
     override fun clearAllNotifications() = rec("clearAll")
+    override fun removeNotification(androidNotificationId: Int) = rec("removeNotificationId $androidNotificationId")
+    override fun removeNotification(identifier: String) = rec("removeNotification $identifier")
+    override fun removeGroupedNotifications(group: String) = rec("removeGroup $group")
+    override fun setBadgeCount(count: Int) = rec("badge $count")
+    override fun setAdvertisingId(id: String?) = rec("adId $id")
     override fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?) = rec("event $name $properties $value")
     override fun addTriggers(triggers: Map<String, String>) = rec("addTriggers $triggers")
     override fun removeTriggers(keys: Collection<String>) = rec("removeTriggers $keys")
@@ -61,6 +70,28 @@ private class RecordingPlatform : PushizoPlatform {
     override fun getTriggers() = mapOf("level" to "gold")
     override fun setScreen(name: String?) = rec("screen $name")
     override var inAppPaused = false
+    val inAppClickListeners = mutableListOf<(PushizoInAppClickEvent) -> Unit>()
+    val inAppLifecycleListeners = mutableListOf<PushizoInAppLifecycleListener>()
+    override fun addInAppClickListener(listener: (PushizoInAppClickEvent) -> Unit): PushizoListenerRegistration {
+        inAppClickListeners += listener
+        return PushizoListenerRegistration { inAppClickListeners -= listener }
+    }
+    override fun addInAppLifecycleListener(listener: PushizoInAppLifecycleListener): PushizoListenerRegistration {
+        inAppLifecycleListeners += listener
+        return PushizoListenerRegistration { inAppLifecycleListeners -= listener }
+    }
+
+    val placement = PushizoInAppMessage(
+        "iam_1", "var_a", "banner_top", "blocks", null, "#ffffff", "#111111", dismissible = true,
+        blocks = listOf(
+            PushizoInAppBlock("title", text = "Merhaba"),
+            PushizoInAppBlock("button", button = PushizoInAppButton("btn_1", "Aç", "url", "https://ornek.com", emptyMap(), null, null)),
+        ),
+    )
+    override suspend fun placementsList(key: String, limit: Int): List<PushizoInAppMessage> { rec("placements $key $limit"); return listOf(placement) }
+    override fun placementReportImpression(message: PushizoInAppMessage) = rec("placementImpression ${message.id}")
+    override fun placementReportClick(message: PushizoInAppMessage, buttonId: String) = rec("placementClick ${message.id} $buttonId")
+    override fun placementReportDismiss(message: PushizoInAppMessage) = rec("placementDismiss ${message.id}")
     override val locationShared = true
     override val locationPermissionGranted = false
     override fun setLocationShared(shared: Boolean) = rec("location $shared")
@@ -69,6 +100,9 @@ private class RecordingPlatform : PushizoPlatform {
     private var geofencing = false
     override val geofencingEnabled: Boolean get() = geofencing
     override fun setGeofencingEnabled(enabled: Boolean) { rec("geofencing $enabled"); geofencing = enabled }
+    var backgroundGranted = false
+    override val locationBackgroundPermissionGranted: Boolean get() = backgroundGranted
+    override fun requestBackgroundLocationPermission(host: PushizoPermissionHost, rationale: String?) = rec("backgroundPermission $rationale")
 
     var delivery = PushizoDeliveryStatus.UNSUPPORTED
     var deliveryResult = false
@@ -103,6 +137,63 @@ private class RecordingPlatform : PushizoPlatform {
     )
     override suspend fun getPreferences(): PushizoPreferencesResult { rec("getPreferences"); return preferencesResult }
     override suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult { rec("setPreferences $preferences"); return preferencesResult }
+
+    var chatAvailable = true
+    val chatListeners = mutableListOf<PushizoChatListener>()
+    val chatOpenListeners = mutableListOf<(PushizoChatPushInfo) -> Unit>()
+    val chatMessage = PushizoChatMessage(
+        "m_1", 7, "c_1", "agent", "Ayşe", "Merhaba", listOf(PushizoChatAttachment("att_1", "a.png", "image/png", 10)),
+        listOf(PushizoChatQuickReply("q1", "Evet")), "sent", 5L,
+    )
+    val chatConversation = PushizoChatConversation("conv_1", "open", 7, 3, 5, 2, botActive = false, assigneeName = "Ayşe", createdAt = 1L)
+    override val chatSupported: Boolean get() = chatAvailable
+    override val chatVisitorId: String? get() = "vis_1"
+    override val chatUnreadCount: Int get() = 2
+    override var chatIsListening = false
+    override fun addChatListener(listener: PushizoChatListener): PushizoListenerRegistration {
+        chatListeners += listener
+        return PushizoListenerRegistration { chatListeners -= listener }
+    }
+    override fun addChatOpenListener(listener: (PushizoChatPushInfo) -> Unit): PushizoListenerRegistration {
+        chatOpenListeners += listener
+        return PushizoListenerRegistration { chatOpenListeners -= listener }
+    }
+    override suspend fun chatStart(name: String?, email: String?, language: String?): PushizoChatIdentifyResult {
+        rec("chatStart $name $email $language"); chatIsListening = true
+        return PushizoChatIdentifyResult("usr_1", chatConversation)
+    }
+    override suspend fun chatIdentify(name: String?, email: String?, language: String?): PushizoChatIdentifyResult {
+        rec("chatIdentify $name $email $language")
+        return PushizoChatIdentifyResult("usr_1", null)
+    }
+    override suspend fun chatGetConfig(language: String?): PushizoChatConfig {
+        rec("chatConfig $language")
+        return PushizoChatConfig(true, true, true, "#000", "#fff", "right", "auto", "Destek", "Selam", null, false, false, true, 1024, listOf("image/png"), "tr")
+    }
+    override suspend fun chatGetConversation(): PushizoChatConversationState { rec("chatConversation"); return PushizoChatConversationState(chatConversation, 2) }
+    override suspend fun chatGetMessages(afterSeq: Long?, beforeSeq: Long?, limit: Int): PushizoChatMessagePage {
+        rec("chatMessages $afterSeq $beforeSeq $limit")
+        return PushizoChatMessagePage(listOf(chatMessage), hasMore = true)
+    }
+    override suspend fun chatSendMessage(text: String, optionId: String?): PushizoChatMessage {
+        rec("chatSend $text $optionId")
+        return chatMessage.copy(sender = "visitor", text = text, status = "pending")
+    }
+    override suspend fun chatSendAttachment(bytes: ByteArray, fileName: String, mimeType: String, text: String?): PushizoChatMessage {
+        rec("chatAttachment ${bytes.size} $fileName $mimeType $text")
+        return chatMessage
+    }
+    override suspend fun chatMarkRead(seq: Long): Int { rec("chatMarkRead $seq"); return 0 }
+    override suspend fun chatRefreshUnreadCount(): Int { rec("chatRefreshUnread"); return 2 }
+    override suspend fun chatLeaveOfflineMessage(email: String, text: String, name: String?): PushizoChatMessage {
+        rec("chatOffline $email $text $name")
+        return chatMessage
+    }
+    override fun chatSetTyping(typing: Boolean) = rec("chatTyping $typing")
+    override fun chatStartListening() { rec("chatListen"); chatIsListening = true }
+    override fun chatStopListening() { rec("chatStop"); chatIsListening = false }
+    override fun chatAttachmentUrl(attachmentId: String, download: Boolean): String? =
+        if (chatAvailable) "https://api/chat/attachments/$attachmentId?download=$download" else null
 
     override suspend fun refreshFeatureFlags(): Boolean { rec("flagsRefresh"); return true }
     override fun isFeatureEnabled(key: String, default: Boolean) = if (key == "yeni_sepet") true else default
@@ -326,5 +417,168 @@ class PushizoTest {
         assertEquals(3, Pushizo.FeatureFlags.getValue("limit"))
         assertEquals("varsayılan", Pushizo.FeatureFlags.getValue("yok", "varsayılan"))
         assertEquals(listOf("flagsRefresh"), fake.calls)
+    }
+
+    @Test
+    fun reklamRizasiVeRizaKayitlariTercihUcunaGider() {
+        val result = runSuspending { Pushizo.User.setAdsPersonalizationConsent(true) }
+        assertEquals(fake.preferencesResult, result)
+        runSuspending { Pushizo.User.setAdsPersonalizationConsent(false) }
+        assertEquals(listOf("ads"), runSuspending { Pushizo.User.getConsents() }.map { it.purpose })
+        assertEquals("ads_personalization", Pushizo.User.ADS_PERSONALIZATION)
+        assertEquals(
+            listOf(
+                "setPreferences [PushizoPreferenceInput(category=ads_personalization, channel=null, optedIn=true)]",
+                "setPreferences [PushizoPreferenceInput(category=ads_personalization, channel=null, optedIn=false)]",
+                "getPreferences",
+            ),
+            fake.calls,
+        )
+        // `User` altındaki tercih çağrıları `Preferences` ile aynı platform işlemine gider.
+        fake.calls.clear()
+        runSuspending { Pushizo.User.getPreferences() }
+        runSuspending { Pushizo.User.setPreferences(listOf(PushizoPreferenceInput("promo", "email", optedIn = true))) }
+        assertEquals(listOf("getPreferences", "setPreferences [PushizoPreferenceInput(category=promo, channel=email, optedIn=true)]"), fake.calls)
+    }
+
+    @Test
+    fun reklamKimligiVeAdmKaydi() {
+        Pushizo.Ads.setAdvertisingId("38400000-8cf0-11bd-b23e-10b96e40000d")
+        Pushizo.Ads.setAdvertisingId(null)
+        Pushizo.User.registerAdm("amzn1.adm-registration.v3.x")
+        assertEquals(listOf("adId 38400000-8cf0-11bd-b23e-10b96e40000d", "adId null", "registerAdm amzn1.adm-registration.v3.x"), fake.calls)
+    }
+
+    @Test
+    fun bildirimKaldirmaVeRozet() {
+        Pushizo.Notifications.removeNotification(42)
+        Pushizo.Notifications.removeNotification("req_1")
+        Pushizo.Notifications.removeGroupedNotifications("siparis")
+        Pushizo.Notifications.setBadgeCount(3)
+        Pushizo.Notifications.clearBadge()
+        assertEquals(listOf("removeNotificationId 42", "removeNotification req_1", "removeGroup siparis", "badge 3", "badge 0"), fake.calls)
+        assertFailsWith<IllegalArgumentException> { Pushizo.Notifications.setBadgeCount(-1) }
+        assertEquals(5, fake.calls.size)
+    }
+
+    @Test
+    fun arkaPlanKonumIzni() {
+        assertFalse(Pushizo.Location.backgroundPermissionGranted)
+        fake.backgroundGranted = true
+        assertTrue(Pushizo.Location.backgroundPermissionGranted)
+        val host = testPermissionHost()
+        Pushizo.Location.requestBackgroundPermission(host, "Yakındaki mağazalar için")
+        Pushizo.Location.requestBackgroundPermission(host)
+        Pushizo.Location.requestAlwaysPermission(host)
+        assertEquals(listOf("backgroundPermission Yakındaki mağazalar için", "backgroundPermission null", "backgroundPermission null"), fake.calls)
+    }
+
+    @Test
+    fun uygulamaIciDinleyicileriKaldirilabilir() {
+        val clicks = mutableListOf<PushizoInAppClickEvent>()
+        val click = Pushizo.InAppMessages.addClickListener { clicks += it }
+        fake.inAppClickListeners.forEach { it(PushizoInAppClickEvent("iam_1", "btn_1", "https://ornek.com")) }
+        assertEquals(listOf(PushizoInAppClickEvent("iam_1", "btn_1", "https://ornek.com")), clicks)
+        click.remove()
+        click.remove()
+        assertTrue(fake.inAppClickListeners.isEmpty())
+
+        val seen = mutableListOf<String>()
+        val listener = object : PushizoInAppLifecycleListener {
+            override fun onWillDisplay(event: PushizoInAppLifecycleEvent) { seen += "will ${event.message.id}" }
+            override fun onDidDismiss(event: PushizoInAppLifecycleEvent) { seen += "dismissed ${event.message.id}" }
+        }
+        val lifecycle = Pushizo.InAppMessages.addLifecycleListener(listener)
+        val event = PushizoInAppLifecycleEvent(fake.placement)
+        fake.inAppLifecycleListeners.forEach { it.onWillDisplay(event); it.onDidDisplay(event); it.onWillDismiss(event); it.onDidDismiss(event) }
+        assertEquals(listOf("will iam_1", "dismissed iam_1"), seen)
+        lifecycle.remove()
+        assertTrue(fake.inAppLifecycleListeners.isEmpty())
+    }
+
+    @Test
+    fun yerlesimlerDogrulanirVePlatformaGider() {
+        val messages = runSuspending { Pushizo.Placements.list("home_banner", limit = 3) }
+        val message = messages.single()
+        assertEquals(listOf("iam_1", "var_a", "banner_top", "blocks"), listOf(message.id, message.variantId, message.layout, message.contentType))
+        assertEquals("btn_1", message.blocks.last().button?.id)
+        runSuspending { Pushizo.Placements.list("home_banner") }
+        Pushizo.Placements.reportImpression(message)
+        Pushizo.Placements.reportClick(message, "btn_1")
+        Pushizo.Placements.reportDismiss(message)
+        assertEquals(
+            listOf("placements home_banner 3", "placements home_banner 1", "placementImpression iam_1", "placementClick iam_1 btn_1", "placementDismiss iam_1"),
+            fake.calls,
+        )
+        assertFailsWith<IllegalArgumentException> { runSuspending { Pushizo.Placements.list("Home Banner") } }
+        assertFailsWith<IllegalArgumentException> { runSuspending { Pushizo.Placements.list("home", limit = 11) } }
+        assertFailsWith<IllegalArgumentException> { Pushizo.Placements.reportClick(message, " ") }
+        assertEquals(5, fake.calls.size)
+    }
+
+    @Test
+    fun sohbetCagrilariPlatformaAynenGider() {
+        assertTrue(Pushizo.Chat.isSupported)
+        assertEquals("vis_1", Pushizo.Chat.visitorId)
+        assertEquals(2, Pushizo.Chat.unreadCount)
+        assertFalse(Pushizo.Chat.isListening)
+        assertEquals("conv_1", runSuspending { Pushizo.Chat.start(name = "Ali", email = "a@ornek.com", language = "tr") }.conversation?.id)
+        assertTrue(Pushizo.Chat.isListening)
+        assertEquals(null, runSuspending { Pushizo.Chat.identify() }.conversation)
+        assertEquals("Destek", runSuspending { Pushizo.Chat.getConfig("tr") }.title)
+        assertEquals(2, runSuspending { Pushizo.Chat.getConversation() }.unreadCount)
+        val page = runSuspending { Pushizo.Chat.getMessages(afterSeq = 5) }
+        assertTrue(page.hasMore)
+        assertFalse(page.messages.single().isFromVisitor)
+        val sent = runSuspending { Pushizo.Chat.sendMessage("Selam", optionId = "q1") }
+        assertTrue(sent.isFromVisitor)
+        assertEquals("pending", sent.status)
+        runSuspending { Pushizo.Chat.sendAttachment(ByteArray(3), "a.png", "image/png", text = "ek") }
+        assertEquals(0, runSuspending { Pushizo.Chat.markRead(7) })
+        assertEquals(2, runSuspending { Pushizo.Chat.refreshUnreadCount() })
+        runSuspending { Pushizo.Chat.leaveOfflineMessage("a@ornek.com", "Dönüş yapın") }
+        Pushizo.Chat.setTyping(true)
+        Pushizo.Chat.stopListening()
+        assertFalse(Pushizo.Chat.isListening)
+        Pushizo.Chat.startListening()
+        assertEquals("https://api/chat/attachments/att_1?download=false", Pushizo.Chat.attachmentUrl("att_1"))
+        assertEquals("https://api/chat/attachments/att_1?download=true", Pushizo.Chat.attachmentUrl("att_1", download = true))
+        assertEquals(
+            listOf(
+                "chatStart Ali a@ornek.com tr", "chatIdentify null null null", "chatConfig tr", "chatConversation", "chatMessages 5 null 50",
+                "chatSend Selam q1", "chatAttachment 3 a.png image/png ek", "chatMarkRead 7", "chatRefreshUnread",
+                "chatOffline a@ornek.com Dönüş yapın null", "chatTyping true", "chatStop", "chatListen",
+            ),
+            fake.calls,
+        )
+    }
+
+    @Test
+    fun sohbetDinleyicileriKaldirilabilirVeDesteklenmeyenPlatformdaAdresNull() {
+        val seen = mutableListOf<String>()
+        val registration = Pushizo.Chat.addListener(object : PushizoChatListener {
+            override fun onMessage(message: PushizoChatMessage) { seen += "message ${message.seq}" }
+            override fun onUnreadCountChanged(count: Int) { seen += "unread $count" }
+        })
+        val open = Pushizo.Chat.addOpenListener { seen += "open ${it.conversationId} ${it.seq}" }
+        fake.chatListeners.forEach { it.onMessage(fake.chatMessage); it.onTyping(true, "Ayşe"); it.onUnreadCountChanged(1); it.onError("x", null) }
+        fake.chatOpenListeners.forEach { it(PushizoChatPushInfo("conv_1", 7)) }
+        assertEquals(listOf("message 7", "unread 1", "open conv_1 7"), seen)
+        registration.remove()
+        open.remove()
+        assertTrue(fake.chatListeners.isEmpty())
+        assertTrue(fake.chatOpenListeners.isEmpty())
+
+        fake.chatAvailable = false
+        assertFalse(Pushizo.Chat.isSupported)
+        assertEquals(null, Pushizo.Chat.attachmentUrl("att_1"))
+    }
+
+    @Test
+    fun yerlesimMesajiEsitligiYerelNesneyiKapsamaz() {
+        val a = fake.placement.copy()
+        val b = fake.placement.copy().also { it.native = "yerel" }
+        assertEquals(a, b)
+        assertEquals(null, PushizoNotification(null, null, null, null, null, null, null, emptyList(), emptyMap()).androidNotificationId)
     }
 }

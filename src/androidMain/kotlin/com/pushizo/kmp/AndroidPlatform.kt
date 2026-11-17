@@ -2,6 +2,15 @@ package com.pushizo.kmp
 
 import android.app.Activity
 import android.content.Context
+import com.pushizo.sdk.HsChatConfig
+import com.pushizo.sdk.HsChatConversation
+import com.pushizo.sdk.HsChatConversationState
+import com.pushizo.sdk.HsChatIdentifyResult
+import com.pushizo.sdk.HsChatListener
+import com.pushizo.sdk.HsChatMessage
+import com.pushizo.sdk.HsChatMessagePage
+import com.pushizo.sdk.HsChatOpenListener
+import com.pushizo.sdk.HsChatPushInfo
 import com.pushizo.sdk.HsClickEvent
 import com.pushizo.sdk.HsConsent
 import com.pushizo.sdk.HsForegroundEvent
@@ -10,6 +19,12 @@ import com.pushizo.sdk.HsContentCardFeed
 import com.pushizo.sdk.HsDeliveryRisk
 import com.pushizo.sdk.HsDeliverySetting
 import com.pushizo.sdk.HsDeliveryStatus
+import com.pushizo.sdk.HsInAppAction
+import com.pushizo.sdk.HsInAppBlock
+import com.pushizo.sdk.HsInAppClickEvent
+import com.pushizo.sdk.HsInAppLifecycleEvent
+import com.pushizo.sdk.HsInAppLifecycleListener
+import com.pushizo.sdk.HsInAppMessage
 import com.pushizo.sdk.HsInboxItem
 import com.pushizo.sdk.HsInboxPage
 import com.pushizo.sdk.HsLog
@@ -58,7 +73,7 @@ internal fun HsNotification.toCommon() = PushizoNotification(
     messageId = messageId,
     actions = actions.map { PushizoNotificationAction(it.id, it.title, it.url) },
     data = data,
-)
+).also { it.androidNotificationId = androidNotificationId }
 
 internal fun HsClickEvent.toCommon() = PushizoClickEvent(notification.toCommon(), actionId, url)
 
@@ -115,6 +130,91 @@ internal fun HsDeliveryStatus.toCommon() = PushizoDeliveryStatus(
     recommendedSettings = recommendedSettings.mapNotNull { it.toCommon() },
 )
 
+internal fun HsInAppBlock.Button.toCommon(): PushizoInAppButton {
+    val (type, value, tags) = when (val a = action) {
+        HsInAppAction.Dismiss -> Triple("dismiss", null, emptyMap<String, String>())
+        is HsInAppAction.Url -> Triple("url", a.url, emptyMap())
+        is HsInAppAction.Deeplink -> Triple("deeplink", a.url, emptyMap())
+        is HsInAppAction.Tags -> Triple("tags", null, a.tags)
+        HsInAppAction.PushPrompt -> Triple("push_prompt", null, emptyMap())
+        is HsInAppAction.Outcome -> Triple("outcome", a.name, emptyMap())
+    }
+    return PushizoInAppButton(id, text, type, value, tags, backgroundColor, textColor)
+}
+
+/** Blok türleri iOS Objective-C cephesiyle aynı düz biçime (`kind`) çevrilir. */
+internal fun HsInAppBlock.toCommon(): PushizoInAppBlock = when (this) {
+    is HsInAppBlock.Image -> PushizoInAppBlock("image", url = url, alt = alt)
+    is HsInAppBlock.Title -> PushizoInAppBlock("title", text = text)
+    is HsInAppBlock.Body -> PushizoInAppBlock("body", text = text)
+    is HsInAppBlock.Button -> PushizoInAppBlock("button", button = toCommon())
+    is HsInAppBlock.Carousel -> PushizoInAppBlock(
+        "carousel",
+        cards = cards.map { PushizoInAppCarouselCard(it.id, it.title, it.body, it.imageUrl, it.imageAlt, it.button?.toCommon()) },
+    )
+}
+
+internal fun HsInAppMessage.toCommon(): PushizoInAppMessage = PushizoInAppMessage(
+    id = id,
+    variantId = variantId,
+    layout = display.layout.wire,
+    contentType = display.contentType.wire,
+    html = display.html,
+    backgroundColor = display.backgroundColor,
+    textColor = display.textColor,
+    dismissible = display.dismissible,
+    blocks = display.blocks.map { it.toCommon() },
+).also { it.native = this }
+
+internal fun HsInAppClickEvent.toCommon() = PushizoInAppClickEvent(messageId, actionId, url)
+
+internal fun HsChatMessage.toCommon() = PushizoChatMessage(
+    id, seq, clientMessageId, sender, authorName, text,
+    attachments.map { PushizoChatAttachment(it.id, it.name, it.type, it.size) },
+    quickReplies?.map { PushizoChatQuickReply(it.id, it.label) },
+    status, createdAt,
+)
+
+internal fun HsChatConversation.toCommon() =
+    PushizoChatConversation(id, status, lastSeq, agentLastReadSeq, visitorLastReadSeq, unreadCount, botActive, assigneeName, createdAt)
+
+internal fun HsChatConversationState.toCommon() = PushizoChatConversationState(conversation?.toCommon(), unreadCount)
+
+internal fun HsChatMessagePage.toCommon() = PushizoChatMessagePage(messages.map { it.toCommon() }, hasMore)
+
+internal fun HsChatIdentifyResult.toCommon() = PushizoChatIdentifyResult(userId, conversation?.toCommon())
+
+internal fun HsChatConfig.toCommon() = PushizoChatConfig(
+    enabled, online, withinBusinessHours, color, textColor, position, theme, title, greeting, offlineMessage,
+    collectEmailOffline, requireEmail, attachmentsEnabled, attachmentMaxBytes, attachmentTypes, language,
+)
+
+internal fun HsChatPushInfo.toCommon() = PushizoChatPushInfo(conversationId, seq)
+
+/** Ortak dinleyiciyi yerel sohbet dinleyicisine uyarlar. */
+internal class AndroidChatListener(private val listener: PushizoChatListener) : HsChatListener {
+    override fun onMessage(message: HsChatMessage) = listener.onMessage(message.toCommon())
+    override fun onTyping(typing: Boolean, name: String?) = listener.onTyping(typing, name)
+    override fun onAgentRead(seq: Long) = listener.onAgentRead(seq)
+    override fun onUnreadCountChanged(count: Int) = listener.onUnreadCountChanged(count)
+    override fun onConversationUpdated(conversationId: String, status: String, botActive: Boolean) =
+        listener.onConversationUpdated(conversationId, status, botActive)
+    override fun onConnectionChanged(connected: Boolean) = listener.onConnectionChanged(connected)
+    override fun onError(code: String, message: String?) = listener.onError(code, message)
+}
+
+/** Ortak yaşam döngüsü dinleyicisini yerel dinleyiciye uyarlar. */
+internal class AndroidInAppLifecycleListener(private val listener: PushizoInAppLifecycleListener) : HsInAppLifecycleListener {
+    private fun HsInAppLifecycleEvent.common() = PushizoInAppLifecycleEvent(message.toCommon())
+    override fun onWillDisplay(event: HsInAppLifecycleEvent) = listener.onWillDisplay(event.common())
+    override fun onDidDisplay(event: HsInAppLifecycleEvent) = listener.onDidDisplay(event.common())
+    override fun onWillDismiss(event: HsInAppLifecycleEvent) = listener.onWillDismiss(event.common())
+    override fun onDidDismiss(event: HsInAppLifecycleEvent) = listener.onDidDismiss(event.common())
+}
+
+/** Raporlama yalnızca `Placements.list` sonucundan gelen (yerel nesnesi olan) mesajla yapılır; diğerleri yok sayılır. */
+internal fun PushizoInAppMessage.nativeAndroid(): HsInAppMessage? = native as? HsInAppMessage
+
 /** Bayrak değerindeki `org.json` türleri ortak koleksiyonlara çevrilir; `JSONObject.NULL` null olur. */
 internal fun Any?.toCommonJson(): Any? = when (this) {
     null, JSONObject.NULL -> null
@@ -158,6 +258,7 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override val smsNumbers: List<String> get() = Native.User.smsNumbers
     override val externalId: String? get() = Native.User.externalId
     override val userId: String? get() = Native.User.id
+    override fun registerAdm(token: String) = Native.User.registerAdm(token)
 
     override val subscriptionState: PushizoSubscriptionState get() = Native.User.pushSubscription.state.toCommon()
     override fun optIn() = Native.User.pushSubscription.optIn()
@@ -192,6 +293,19 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     }
 
     override fun clearAllNotifications() = Native.Notifications.clearAll()
+    override fun removeNotification(androidNotificationId: Int) = Native.Notifications.removeNotification(androidNotificationId)
+
+    /** Android'de bildirim kimliği sayıdır; sayı olmayan (iOS) kimlik yok sayılır. */
+    override fun removeNotification(identifier: String) {
+        identifier.trim().toIntOrNull()?.let(Native.Notifications::removeNotification)
+    }
+
+    override fun removeGroupedNotifications(group: String) = Native.Notifications.removeGroupedNotifications(group)
+
+    /** Android'de rozet görünen bildirimlerden hesaplanır; ayarlanacak bir sayaç yoktur. */
+    override fun setBadgeCount(count: Int) = Unit
+
+    override fun setAdvertisingId(id: String?) = Native.Ads.setAdvertisingId(id)
 
     override fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?) =
         Native.Session.sendEvent(name, properties, value)
@@ -205,6 +319,33 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
         get() = Native.InAppMessages.paused
         set(value) { Native.InAppMessages.paused = value }
 
+    override fun addInAppClickListener(listener: (PushizoInAppClickEvent) -> Unit): PushizoListenerRegistration {
+        val native: (HsInAppClickEvent) -> Unit = { listener(it.toCommon()) }
+        Native.InAppMessages.addClickListener(native)
+        return PushizoListenerRegistration { Native.InAppMessages.removeClickListener(native) }
+    }
+
+    override fun addInAppLifecycleListener(listener: PushizoInAppLifecycleListener): PushizoListenerRegistration {
+        val native = AndroidInAppLifecycleListener(listener)
+        Native.InAppMessages.addLifecycleListener(native)
+        return PushizoListenerRegistration { Native.InAppMessages.removeLifecycleListener(native) }
+    }
+
+    override suspend fun placementsList(key: String, limit: Int): List<PushizoInAppMessage> =
+        suspendCoroutine { cont -> Native.Placements.list(key, limit) { messages -> cont.resume(messages.map { it.toCommon() }) } }
+
+    override fun placementReportImpression(message: PushizoInAppMessage) {
+        message.nativeAndroid()?.let(Native.Placements::reportImpression)
+    }
+
+    override fun placementReportClick(message: PushizoInAppMessage, buttonId: String) {
+        message.nativeAndroid()?.let { Native.Placements.reportClick(it, buttonId) }
+    }
+
+    override fun placementReportDismiss(message: PushizoInAppMessage) {
+        message.nativeAndroid()?.let(Native.Placements::reportDismiss)
+    }
+
     override val locationShared: Boolean get() = Native.Location.isShared
     override val locationPermissionGranted: Boolean get() = Native.Location.permissionGranted
     override fun setLocationShared(shared: Boolean) = Native.Location.setShared(shared)
@@ -214,6 +355,9 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override fun onLocationPermissionResult() = Native.Location.onPermissionResult()
     override val geofencingEnabled: Boolean get() = Native.Location.isGeofencingEnabled
     override fun setGeofencingEnabled(enabled: Boolean) = Native.Location.setGeofencingEnabled(enabled)
+    override val locationBackgroundPermissionGranted: Boolean get() = Native.Location.backgroundPermissionGranted
+    override fun requestBackgroundLocationPermission(host: PushizoPermissionHost, rationale: String?) =
+        Native.Location.requestBackgroundPermission(host, rationale)
 
     // Android teslimat güçlendirme (ADR-0092): teşhis, ayar ekranı adayları ve diyalog yerel SDK'dadır.
     override fun deliveryStatus(): PushizoDeliveryStatus = Native.Delivery.status()?.toCommon() ?: PushizoDeliveryStatus.UNSUPPORTED
@@ -238,6 +382,49 @@ internal object AndroidPushizoPlatform : PushizoPlatform {
     override suspend fun getPreferences(): PushizoPreferencesResult = Native.User.getPreferences().toCommon()
     override suspend fun setPreferences(preferences: List<PushizoPreferenceInput>): PushizoPreferencesResult =
         Native.User.setPreferences(preferences.map { it.toNative() }).toCommon()
+
+    // Canlı sohbet (ADR-0040): yerel `Pushizo.Chat`.
+    override val chatSupported: Boolean get() = true
+    override val chatVisitorId: String? get() = Native.Chat.visitorId
+    override val chatUnreadCount: Int get() = Native.Chat.unreadCount
+    override val chatIsListening: Boolean get() = Native.Chat.isListening
+
+    override fun addChatListener(listener: PushizoChatListener): PushizoListenerRegistration {
+        val native = AndroidChatListener(listener)
+        Native.Chat.addListener(native)
+        return PushizoListenerRegistration { Native.Chat.removeListener(native) }
+    }
+
+    override fun addChatOpenListener(listener: (PushizoChatPushInfo) -> Unit): PushizoListenerRegistration {
+        val native = HsChatOpenListener { listener(it.toCommon()) }
+        Native.Chat.addOpenListener(native)
+        return PushizoListenerRegistration { Native.Chat.removeOpenListener(native) }
+    }
+
+    override suspend fun chatStart(name: String?, email: String?, language: String?): PushizoChatIdentifyResult =
+        Native.Chat.start(name, email, language).toCommon()
+
+    override suspend fun chatIdentify(name: String?, email: String?, language: String?): PushizoChatIdentifyResult =
+        Native.Chat.identify(name, email, language).toCommon()
+
+    override suspend fun chatGetConfig(language: String?): PushizoChatConfig = Native.Chat.getConfig(language).toCommon()
+    override suspend fun chatGetConversation(): PushizoChatConversationState = Native.Chat.getConversation().toCommon()
+    override suspend fun chatGetMessages(afterSeq: Long?, beforeSeq: Long?, limit: Int): PushizoChatMessagePage =
+        Native.Chat.getMessages(afterSeq, beforeSeq, limit).toCommon()
+
+    override suspend fun chatSendMessage(text: String, optionId: String?): PushizoChatMessage = Native.Chat.sendMessage(text, optionId).toCommon()
+    override suspend fun chatSendAttachment(bytes: ByteArray, fileName: String, mimeType: String, text: String?): PushizoChatMessage =
+        Native.Chat.sendAttachment(bytes, fileName, mimeType, text).toCommon()
+
+    override suspend fun chatMarkRead(seq: Long): Int = Native.Chat.markRead(seq)
+    override suspend fun chatRefreshUnreadCount(): Int = Native.Chat.refreshUnreadCount()
+    override suspend fun chatLeaveOfflineMessage(email: String, text: String, name: String?): PushizoChatMessage =
+        Native.Chat.leaveOfflineMessage(email, text, name).toCommon()
+
+    override fun chatSetTyping(typing: Boolean) = Native.Chat.setTyping(typing)
+    override fun chatStartListening() = Native.Chat.startListening()
+    override fun chatStopListening() = Native.Chat.stopListening()
+    override fun chatAttachmentUrl(attachmentId: String, download: Boolean): String? = Native.Chat.attachmentUrl(attachmentId, download)
 
     override suspend fun refreshFeatureFlags(): Boolean = suspendCoroutine { cont -> Native.FeatureFlags.refresh { cont.resume(it) } }
     override fun isFeatureEnabled(key: String, default: Boolean): Boolean = Native.FeatureFlags.isEnabled(key, default)

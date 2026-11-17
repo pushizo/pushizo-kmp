@@ -35,7 +35,14 @@ data class PushizoNotification(
     val messageId: String?,
     val actions: List<PushizoNotificationAction>,
     val data: Map<String, String>,
-)
+) {
+    /**
+     * Android tepsi kimliği (`Notifications.removeNotification` için); iOS'ta null. Kurucuya eklenmedi: data class
+     * kurucusu, `copy` ve `componentN` imzaları (ikili uyumluluk) değişmesin diye gövde özelliğidir.
+     */
+    var androidNotificationId: Int? = null
+        internal set
+}
 
 /** Bildirim tıklaması. [actionId] düğmeye basıldıysa dolar. */
 data class PushizoClickEvent(val notification: PushizoNotification, val actionId: String?, val url: String?)
@@ -217,4 +224,153 @@ data class PushizoDeliveryStatus(
         /** Teşhisin desteklenmediği platformların durumu (risk yok). */
         val UNSUPPORTED = PushizoDeliveryStatus(supported = false)
     }
+}
+
+/** In-app / yerleşim düğmesi. [actionType]: `dismiss`, `url`, `deeplink`, `tags`, `push_prompt`, `outcome`. */
+data class PushizoInAppButton(
+    val id: String,
+    val text: String,
+    val actionType: String,
+    /** `url`/`deeplink` adresi veya `outcome` adı; diğer türlerde null. */
+    val actionValue: String?,
+    /** `tags` eyleminin etiketleri; diğer türlerde boş. */
+    val actionTags: Map<String, String>,
+    val backgroundColor: String?,
+    val textColor: String?,
+)
+
+/** Carousel kartı; [button] geçersiz aksiyonluysa null. */
+data class PushizoInAppCarouselCard(
+    val id: String,
+    val title: String,
+    val body: String?,
+    val imageUrl: String?,
+    val imageAlt: String?,
+    val button: PushizoInAppButton?,
+)
+
+/** İçerik bloğu. [kind]: `image` ([url], [alt]), `title` ve `body` ([text]), `button` ([button]), `carousel` ([cards]). */
+data class PushizoInAppBlock(
+    val kind: String,
+    val text: String? = null,
+    val url: String? = null,
+    val alt: String? = null,
+    val button: PushizoInAppButton? = null,
+    val cards: List<PushizoInAppCarouselCard> = emptyList(),
+)
+
+/**
+ * In-app mesaj / gömülü yerleşim içeriği (`Pushizo.Placements.list`). Çizim uygulamanındır; içerik görününce
+ * `Placements.reportImpression` çağrılır. Raporlama için nesne `list` sonucundan gelen örnek olmalıdır.
+ */
+data class PushizoInAppMessage(
+    val id: String,
+    val variantId: String?,
+    /** `modal`, `banner_top`, `banner_bottom`, `fullscreen`. */
+    val layout: String,
+    /** `blocks` veya `html`. */
+    val contentType: String,
+    val html: String?,
+    val backgroundColor: String?,
+    val textColor: String?,
+    val dismissible: Boolean,
+    val blocks: List<PushizoInAppBlock>,
+) {
+    /** Yerel SDK nesnesi (raporlama çağrıları bunu kullanır); eşitlik karşılaştırmasına girmez. */
+    internal var native: Any? = null
+}
+
+/** In-app mesaj tıklaması. [actionId] düğme kimliği; [url] url/deeplink aksiyonunun adresi. */
+data class PushizoInAppClickEvent(val messageId: String, val actionId: String, val url: String?)
+
+/** In-app yaşam döngüsü olayı. */
+data class PushizoInAppLifecycleEvent(val message: PushizoInAppMessage)
+
+/** In-app yaşam döngüsü dinleyicisi; varsayılan gövdeler boştur. iOS'ta henüz tetiklenmez (bkz. `InAppMessages.addLifecycleListener`). */
+interface PushizoInAppLifecycleListener {
+    fun onWillDisplay(event: PushizoInAppLifecycleEvent) {}
+    fun onDidDisplay(event: PushizoInAppLifecycleEvent) {}
+    fun onWillDismiss(event: PushizoInAppLifecycleEvent) {}
+    fun onDidDismiss(event: PushizoInAppLifecycleEvent) {}
+}
+
+/** Sohbet eki. */
+data class PushizoChatAttachment(val id: String, val name: String, val type: String, val size: Long)
+
+/** Bot hızlı yanıt seçeneği (`Chat.sendMessage(text, optionId)`). */
+data class PushizoChatQuickReply(val id: String, val label: String)
+
+/**
+ * Sohbet mesajı. [sender]: `visitor`, `agent`, `bot`, `system`; [status]: `pending`, `sent`, `delivered`, `read`.
+ * [createdAt] epoch milisaniyedir.
+ */
+data class PushizoChatMessage(
+    val id: String?,
+    val seq: Long,
+    val clientMessageId: String?,
+    val sender: String,
+    val authorName: String?,
+    val text: String?,
+    val attachments: List<PushizoChatAttachment>,
+    val quickReplies: List<PushizoChatQuickReply>?,
+    val status: String,
+    val createdAt: Long?,
+) {
+    val isFromVisitor: Boolean get() = sender == "visitor"
+}
+
+/** Sohbet konuşması. */
+data class PushizoChatConversation(
+    val id: String,
+    val status: String,
+    val lastSeq: Long,
+    val agentLastReadSeq: Long,
+    val visitorLastReadSeq: Long,
+    val unreadCount: Int,
+    val botActive: Boolean,
+    val assigneeName: String?,
+    val createdAt: Long?,
+)
+
+/** Konuşma durumu; konuşma henüz yoksa [conversation] null. */
+data class PushizoChatConversationState(val conversation: PushizoChatConversation?, val unreadCount: Int)
+
+/** Mesaj sayfası (sıra numarasına göre artan). */
+data class PushizoChatMessagePage(val messages: List<PushizoChatMessage>, val hasMore: Boolean)
+
+/** `Chat.start` / `Chat.identify` sonucu. */
+data class PushizoChatIdentifyResult(val userId: String?, val conversation: PushizoChatConversation?)
+
+/** Sohbet penceresi yapılandırması (panelden). */
+data class PushizoChatConfig(
+    val enabled: Boolean,
+    val online: Boolean,
+    val withinBusinessHours: Boolean,
+    val color: String?,
+    val textColor: String?,
+    val position: String,
+    val theme: String,
+    val title: String?,
+    val greeting: String?,
+    val offlineMessage: String?,
+    val collectEmailOffline: Boolean,
+    val requireEmail: Boolean,
+    val attachmentsEnabled: Boolean,
+    val attachmentMaxBytes: Long,
+    val attachmentTypes: List<String>,
+    val language: String,
+)
+
+/** Sohbet bildirimi tıklaması (`Chat.addOpenListener`). */
+data class PushizoChatPushInfo(val conversationId: String, val seq: Long)
+
+/** Canlı sohbet olayları; varsayılan gövdeler boştur. Geri çağrılar arka plan iş parçacığında gelebilir. */
+interface PushizoChatListener {
+    fun onMessage(message: PushizoChatMessage) {}
+    fun onTyping(typing: Boolean, name: String?) {}
+    fun onAgentRead(seq: Long) {}
+    fun onUnreadCountChanged(count: Int) {}
+    fun onConversationUpdated(conversationId: String, status: String, botActive: Boolean) {}
+    fun onConnectionChanged(connected: Boolean) {}
+    fun onError(code: String, message: String?) {}
 }

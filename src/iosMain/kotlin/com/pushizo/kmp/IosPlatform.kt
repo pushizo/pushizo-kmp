@@ -5,6 +5,11 @@ package com.pushizo.kmp
 import com.pushizo.kmp.ios.PZClickEvent
 import com.pushizo.kmp.ios.PZFeatureFlags
 import com.pushizo.kmp.ios.PZForegroundEvent
+import com.pushizo.kmp.ios.PZInAppBlock
+import com.pushizo.kmp.ios.PZInAppButton
+import com.pushizo.kmp.ios.PZInAppCarouselCard
+import com.pushizo.kmp.ios.PZInAppClickEvent
+import com.pushizo.kmp.ios.PZInAppMessage
 import com.pushizo.kmp.ios.PZInAppMessages
 import com.pushizo.kmp.ios.PZContentCard
 import com.pushizo.kmp.ios.PZContentCardFeed
@@ -23,6 +28,7 @@ import com.pushizo.kmp.ios.PZNotification
 import com.pushizo.kmp.ios.PZNotificationAction
 import com.pushizo.kmp.ios.PZNotifications
 import com.pushizo.kmp.ios.PZOptions
+import com.pushizo.kmp.ios.PZPlacements
 import com.pushizo.kmp.ios.PZPreference
 import com.pushizo.kmp.ios.PZPreferenceInput
 import com.pushizo.kmp.ios.PZPreferencesResult
@@ -45,6 +51,7 @@ import platform.CoreLocation.kCLAuthorizationStatusAuthorizedAlways
 import platform.CoreLocation.kCLAuthorizationStatusAuthorizedWhenInUse
 import platform.Foundation.NSDate
 import platform.Foundation.NSError
+import platform.Foundation.NSLog
 import platform.Foundation.NSNull
 import platform.Foundation.NSNumber
 import platform.Foundation.timeIntervalSince1970
@@ -136,6 +143,49 @@ internal fun PZNotification.toCommon() = PushizoNotification(
     actions = actions().filterIsInstance<PZNotificationAction>().map { PushizoNotificationAction(it.actionId(), it.title(), it.url()) },
     data = data().toStringMap(),
 )
+
+internal fun PZInAppButton.toCommon() = PushizoInAppButton(
+    id = buttonId(),
+    text = text(),
+    actionType = actionType(),
+    actionValue = actionValue(),
+    actionTags = actionTags().toStringMap(),
+    backgroundColor = backgroundColor(),
+    textColor = textColor(),
+)
+
+internal fun PZInAppBlock.toCommon() = PushizoInAppBlock(
+    kind = kind(),
+    text = text(),
+    url = url(),
+    alt = alt(),
+    button = button()?.toCommon(),
+    cards = cards().filterIsInstance<PZInAppCarouselCard>().map {
+        PushizoInAppCarouselCard(it.cardId(), it.title(), it.body(), it.imageUrl(), it.imageAlt(), it.button()?.toCommon())
+    },
+)
+
+internal fun PZInAppMessage.toCommon(): PushizoInAppMessage = PushizoInAppMessage(
+    id = messageId(),
+    variantId = variantId(),
+    layout = layout(),
+    contentType = contentType(),
+    html = html(),
+    backgroundColor = backgroundColor(),
+    textColor = textColor(),
+    dismissible = dismissible(),
+    blocks = blocks().filterIsInstance<PZInAppBlock>().map { it.toCommon() },
+).also { it.native = this }
+
+/** Raporlama yalnızca `Placements.list` sonucundan gelen (cephe nesnesi olan) mesajla yapılır; diğerleri yok sayılır. */
+internal fun PushizoInAppMessage.nativeIos(): PZInAppMessage? = native as? PZInAppMessage
+
+/** Objective-C cephesinde karşılığı olmayan çağrılar için uyarı (çağrı etkisizdir). */
+internal fun warnUnsupported(api: String) = NSLog("[Pushizo] $api iOS Kotlin Multiplatform köprüsünde henüz desteklenmiyor; çağrı etkisiz.")
+
+/** Sohbetin bağlı olmadığı platformda değer döndürmesi gereken çağrıların hatası. */
+internal fun chatUnsupported(): Nothing =
+    throw UnsupportedOperationException("Pushizo.Chat iOS Kotlin Multiplatform köprüsünde henüz desteklenmiyor (Pushizo.Chat.isSupported).")
 
 internal fun PZInboxItem.toCommon() = PushizoInboxItem(
     id = itemId(),
@@ -271,6 +321,9 @@ internal object IosPushizoPlatform : PushizoPlatform {
     override val externalId: String? get() = PZUser.externalId()
     override val userId: String? get() = PZUser.userId()
 
+    /** ADM yalnızca Fire OS'ta vardır. */
+    override fun registerAdm(token: String) = Unit
+
     override val subscriptionState: PushizoSubscriptionState
         get() = PushizoSubscriptionState(PZPushSubscription.subscriptionId(), PZPushSubscription.token(), PZPushSubscription.optedIn(), cachedPermission)
 
@@ -311,6 +364,15 @@ internal object IosPushizoPlatform : PushizoPlatform {
 
     override fun clearAllNotifications() = PZNotifications.clearAll()
 
+    /** Sayısal tepsi kimliği Android'e özgüdür. */
+    override fun removeNotification(androidNotificationId: Int) = Unit
+    override fun removeNotification(identifier: String) = PZNotifications.removeNotification(identifier)
+    override fun removeGroupedNotifications(group: String) = PZNotifications.removeGroupedNotifications(group)
+    override fun setBadgeCount(count: Int) = PZNotifications.setBadgeCount(count.toLong())
+
+    /** Objective-C cephesinde `Ads` yok: çağrı etkisizdir. */
+    override fun setAdvertisingId(id: String?) = warnUnsupported("Ads.setAdvertisingId")
+
     override fun sendEvent(name: String, properties: Map<String, Any?>, value: Double?) =
         PZSession.sendEvent(name, properties = properties.toObjC(), value = value?.let { NSNumber(double = it) })
 
@@ -322,6 +384,35 @@ internal object IosPushizoPlatform : PushizoPlatform {
     override var inAppPaused: Boolean
         get() = PZInAppMessages.paused()
         set(value) = PZInAppMessages.setPaused(value)
+
+    override fun addInAppClickListener(listener: (PushizoInAppClickEvent) -> Unit): PushizoListenerRegistration {
+        val token = PZInAppMessages.addClickListener { event: PZInAppClickEvent? ->
+            event?.let { listener(PushizoInAppClickEvent(it.messageId(), it.actionId(), it.url())) }
+        }
+        return PushizoListenerRegistration { token.remove() }
+    }
+
+    /** Objective-C cephesinde yaşam döngüsü dinleyicisi yok: kayıt tutulur ama olay gelmez. */
+    override fun addInAppLifecycleListener(listener: PushizoInAppLifecycleListener): PushizoListenerRegistration {
+        warnUnsupported("InAppMessages.addLifecycleListener")
+        return PushizoListenerRegistration { }
+    }
+
+    override suspend fun placementsList(key: String, limit: Int): List<PushizoInAppMessage> =
+        awaitResult<List<*>> { done -> PZPlacements.listWithKey(key, limit = limit.toLong(), completion = done) }
+            .filterIsInstance<PZInAppMessage>().map { it.toCommon() }
+
+    override fun placementReportImpression(message: PushizoInAppMessage) {
+        message.nativeIos()?.let { PZPlacements.reportImpression(it) }
+    }
+
+    override fun placementReportClick(message: PushizoInAppMessage, buttonId: String) {
+        message.nativeIos()?.let { PZPlacements.reportClick(it, buttonId = buttonId) }
+    }
+
+    override fun placementReportDismiss(message: PushizoInAppMessage) {
+        message.nativeIos()?.let { PZPlacements.reportDismiss(it) }
+    }
 
     override val locationShared: Boolean get() = PZLocation.isShared()
 
@@ -338,6 +429,13 @@ internal object IosPushizoPlatform : PushizoPlatform {
     override fun onLocationPermissionResult() = Unit
     override val geofencingEnabled: Boolean get() = PZLocation.isGeofencingEnabled()
     override fun setGeofencingEnabled(enabled: Boolean) = PZLocation.setGeofencingEnabled(enabled)
+
+    override val locationBackgroundPermissionGranted: Boolean
+        get() = CLLocationManager().authorizationStatus == kCLAuthorizationStatusAuthorizedAlways
+
+    /** iOS'ta arka plan izni "her zaman" iznidir; açıklama metni sistem isteminde Info.plist'ten gelir. */
+    override fun requestBackgroundLocationPermission(host: PushizoPermissionHost, rationale: String?) =
+        PZLocation.requestAlwaysPermissionWithCompletion { granted -> if (granted) lastLocationGrant = true }
 
     // Android teslimat güçlendirme (ADR-0092) iOS'ta yoktur: durum "desteklenmiyor / risk yok", diğerleri etkisiz false.
     override fun deliveryStatus(): PushizoDeliveryStatus = PushizoDeliveryStatus.UNSUPPORTED
@@ -380,6 +478,28 @@ internal object IosPushizoPlatform : PushizoPlatform {
         val input = preferences.map { PZPreferenceInput(category = it.category, channel = it.channel, optedIn = it.optedIn) }
         return awaitResult<PZPreferencesResult> { done -> PZUser.setPreferences(input, done) }.toCommon()
     }
+
+    // Canlı sohbet: Objective-C cephesinde yok. Özellikler boş, void çağrılar etkisiz, değer döndüren çağrılar hata verir.
+    override val chatSupported: Boolean get() = false
+    override val chatVisitorId: String? get() = null
+    override val chatUnreadCount: Int get() = 0
+    override val chatIsListening: Boolean get() = false
+    override fun addChatListener(listener: PushizoChatListener): PushizoListenerRegistration = PushizoListenerRegistration { }
+    override fun addChatOpenListener(listener: (PushizoChatPushInfo) -> Unit): PushizoListenerRegistration = PushizoListenerRegistration { }
+    override suspend fun chatStart(name: String?, email: String?, language: String?): PushizoChatIdentifyResult = chatUnsupported()
+    override suspend fun chatIdentify(name: String?, email: String?, language: String?): PushizoChatIdentifyResult = chatUnsupported()
+    override suspend fun chatGetConfig(language: String?): PushizoChatConfig = chatUnsupported()
+    override suspend fun chatGetConversation(): PushizoChatConversationState = chatUnsupported()
+    override suspend fun chatGetMessages(afterSeq: Long?, beforeSeq: Long?, limit: Int): PushizoChatMessagePage = chatUnsupported()
+    override suspend fun chatSendMessage(text: String, optionId: String?): PushizoChatMessage = chatUnsupported()
+    override suspend fun chatSendAttachment(bytes: ByteArray, fileName: String, mimeType: String, text: String?): PushizoChatMessage = chatUnsupported()
+    override suspend fun chatMarkRead(seq: Long): Int = chatUnsupported()
+    override suspend fun chatRefreshUnreadCount(): Int = chatUnsupported()
+    override suspend fun chatLeaveOfflineMessage(email: String, text: String, name: String?): PushizoChatMessage = chatUnsupported()
+    override fun chatSetTyping(typing: Boolean) = warnUnsupported("Chat.setTyping")
+    override fun chatStartListening() = warnUnsupported("Chat.startListening")
+    override fun chatStopListening() = warnUnsupported("Chat.stopListening")
+    override fun chatAttachmentUrl(attachmentId: String, download: Boolean): String? = null
 
     override suspend fun refreshFeatureFlags(): Boolean = suspendCoroutine { cont -> PZFeatureFlags.refreshWithCompletion { cont.resume(it) } }
     override fun isFeatureEnabled(key: String, default: Boolean): Boolean = PZFeatureFlags.isEnabled(key, defaultValue = default)
